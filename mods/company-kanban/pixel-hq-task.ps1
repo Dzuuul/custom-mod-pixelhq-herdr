@@ -38,9 +38,10 @@ if ($Effort -and $Effort -notin $Efforts) { Stop-Usage "effort '$Effort' gak dik
 if ($Prioritas -notin @('tinggi', 'normal', 'rendah')) { Stop-Usage "prioritas '$Prioritas' gak dikenal (pilih: tinggi, normal, rendah)" }
 if ($PSBoundParameters.ContainsKey('Batas') -and ($Batas -lt 1 -or $Batas -gt 1440)) { Stop-Usage '-Batas harus 1 sampai 1440 menit' }
 if ($Hentikan -and -not $PSBoundParameters.ContainsKey('Batas')) { Stop-Usage '-Hentikan butuh -Batas' }
+# stdin dibaca sebagai UTF-8 langsung dari aliran mentahnya, sama dengan statusLine dan hook: mengubah
+# [Console]::InputEncoding lalu membaca [Console]::In bikin PowerShell 5.1 keluar diam-diam (kode 5) kalau gak ada konsol
 if ($Detail -eq '-') {
-  try { [Console]::InputEncoding = [System.Text.UTF8Encoding]::new($false) } catch {}
-  $Detail = [Console]::In.ReadToEnd()
+  $Detail = [System.IO.StreamReader]::new([Console]::OpenStandardInput(), [System.Text.UTF8Encoding]::new($false)).ReadToEnd()
 }
 
 $Cfg = if ($env:HERDR_APP_HOME) { $env:HERDR_APP_HOME } else { Join-Path $env:USERPROFILE '.config\herdr-app' }

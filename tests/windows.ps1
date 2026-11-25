@@ -143,15 +143,11 @@ try {
   $r = Invoke-Tool $shim @('-Kerjakan', '-Model', 'sonnet', '-Batas', '30', '-Hentikan', 'Tes dari CI')
   Check 'pixel-hq-task lewat pemanggil di WindowsApps' ($r.code -eq 0 -and (Test-Path $inbox)) $r
   # -D, -E, -P: singkatan yang bentrok dengan -Debug, -ErrorAction, -PipelineVariable kalau gak ada alias
-  $r = Invoke-Tool $shim @('-D', '-', '-E', 'high', '-P', 'tinggi', 'Kedua') $utf8.GetBytes('isi detail')
-  if ($r.code -ne 0) {
-    $direct = Invoke-Ps (Join-Path $Cfg 'mods\company-kanban\pixel-hq-task.ps1') @('-Detail', '-', 'Kedua (langsung)') $utf8.GetBytes('isi detail')
-    Write-Host "      panggilan langsung -Detail -: exit $($direct.code)"; Write-Host $direct.out; Write-Host $direct.err
-  }
+  $r = Invoke-Tool $shim @('-D', '-', '-E', 'high', '-P', 'tinggi', 'Kedua') $utf8.GetBytes("isi detail $check")
   Check 'pixel-hq-task dengan detail dari stdin dan singkatan -D -E -P' ($r.code -eq 0) $r
   $raw = [System.IO.File]::ReadAllText($inbox, $utf8)
   $list = @(ConvertFrom-Json -InputObject $raw | ForEach-Object { $_ })
-  Check 'dua task masuk inbox, yang pertama gak hilang' ($list.Count -eq 2 -and $list[0].title -eq 'Tes dari CI' -and $list[0].column -eq 'doing' -and $list[0].model -eq 'sonnet' -and $list[0].limitMin -eq 30 -and $list[0].limitStop -eq $true -and $list[1].detail -eq 'isi detail' -and $list[1].effort -eq 'high' -and $list[1].priority -eq 'tinggi') $raw
+  Check 'dua task masuk inbox, yang pertama gak hilang' ($list.Count -eq 2 -and $list[0].title -eq 'Tes dari CI' -and $list[0].column -eq 'doing' -and $list[0].model -eq 'sonnet' -and $list[0].limitMin -eq 30 -and $list[0].limitStop -eq $true -and $list[1].detail -eq "isi detail $check" -and $list[1].effort -eq 'high' -and $list[1].priority -eq 'tinggi') $raw
   # yang udah diambil Herdr (tercatat di papan) dibuang dari inbox; pakai PATH (cmd.exe mencari pixel-hq-task.cmd)
   [System.IO.File]::WriteAllText((Join-Path $Cfg 'pixel-hq-kanban.json'), ('{"tasks":[],"imported":["' + $list[0].id + '"]}'), $utf8)
   $r = Invoke-Tool 'cmd.exe' @('/c', 'pixel-hq-task', 'Ketiga')
