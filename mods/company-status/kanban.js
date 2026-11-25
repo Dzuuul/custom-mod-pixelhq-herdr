@@ -14,7 +14,8 @@ const file = () => `${appHome()}/pixel-hq-kanban.json`;
 // Ditulis cuma oleh pixel-hq-task (mods/company-kanban/pixel-hq-task.*); mesin ini cuma membacanya.
 const inboxFile = () => `${appHome()}/pixel-hq-kanban-inbox.json`;
 // File di ~/.local/state/pixel-hq (ditulis statusline dan hook Claude Code), dibaca lewat readState: di Windows
-// juga dari WSL, tempat Claude Code-nya bisa jalan. Itu manggil wsl.exe, jadi yang dicek terus-terusan di-cache.
+// juga dari WSL, tempat Claude Code-nya bisa jalan (cuma dari distro yang lagi jalan). Itu manggil wsl.exe, jadi
+// yang dicek terus-terusan di-cache, di sini dan di state.js (dibagi dengan status bar).
 const USAGE = "claude-usage.json";
 const lastOf = (addr) => `last/${addr}.json`;
 const staffName = (a) => {
@@ -165,7 +166,7 @@ export class KanbanEngine {
   async state(rel, maxAge = 0) {
     const c = this.reads.get(rel), now = Date.now();
     if (maxAge && c && now - c.at < maxAge) return c.value;
-    const value = parse(await readState(rel).catch(() => null));
+    const value = parse(await readState(rel, maxAge).catch(() => null));
     this.reads.set(rel, { at: now, value });
     if (this.reads.size > 200) this.reads.delete(this.reads.keys().next().value);
     return value;
