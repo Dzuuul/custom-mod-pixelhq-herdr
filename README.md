@@ -14,13 +14,14 @@ antarmuka berbahasa Indonesia santai, papan kanban yang bisa menyuruh agent kerj
 | **Bahasa Indonesia santai/gaul** di semua tampilan: status bar, sidebar, panel, form rekrut, editor figur, lembar hotkey, notifikasi updater, nama jabatan | semua mod `company-*` |
 | **Nama staf acak dan unik**: tiap terminal baru (staf baru / sesi baru) dapat nama orang, binatang, atau peliharaan yang belum dipakai staf lain | `company-agents/names.js`, `company-pane` |
 | **Pencarian staf dua bahasa**: `ngetik`, `santai`, `kelar`, `nunggu` dan padanan Inggrisnya sama-sama jalan | `company-agents` |
-| **Papan Kanban** (dialog 3 kolom + panel kanan) dan mesin yang mengirim task ke staf | `company-kanban`, `company-status/kanban.js`, `layouts/pixel-hq.json` |
+| **Papan Kanban** (dialog 3 kolom + panel kanan) dan mesin yang mengirim task ke staf, dengan **EDIT** dan **STOP** di kartu | `company-kanban`, `company-status/kanban.js`, `layouts/pixel-hq.json` |
+| **Hotkey** `Ctrl+Shift+J` (Kanban) dan `Ctrl+Shift+M` (Usage), tampil juga di lembar HOTKEY | `install.sh`/`install.ps1` (`keys.json`), `company-hotkeys` |
 | Tombol **KANBAN** di bar atas dan status bar (dengan jumlah task jalan dan gagal) | `company-tabs`, `company-status` |
-| **Usage Claude Code**: chip `SESI`/`MINGGU` di status bar, notifikasi di 80% dan 95%, dialog riwayat dan pemakaian per staf | `company-status`, `company-usage`, `company-agents/claude-statusline.sh` |
+| **Usage Claude Code**: chip `SESI`/`MINGGU` di status bar, notifikasi (bawaan 80% dan 95%, bisa diganti), dialog riwayat dan pemakaian per staf | `company-status`, `company-usage`, `company-agents/claude-statusline.sh` |
 | **Updater dari repo ini**, bukan dari Pixel HQ asli, jadi tombol update gak menimpa perubahan lokal | `company-agents/updater.js` |
 | **`uninstall.sh`** untuk mencopot atau memulihkan dari backup | `uninstall.sh` |
-| **MusicBox dihapus** (tombol, hotkey, mod) | `company-status`, `company-agents`, `company-hotkeys` |
-| **Installer Windows** (PowerShell, tanpa Python/`sh`) + statusLine & hook aktivitas versi PowerShell | `install.cmd`, `install.ps1`, `company-agents/*.ps1` |
+| **MusicBox dihapus** (tombol, hotkey, mod, area radio di rak) | `company-status`, `company-agents`, `company-hotkeys` |
+| **Installer dan uninstaller Windows** (PowerShell, tanpa Python/`sh`) + statusLine & hook aktivitas versi PowerShell | `install.cmd`, `install.ps1`, `uninstall.cmd`, `uninstall.ps1`, `company-agents/*.ps1` |
 
 Yang sengaja tetap bahasa Inggris: perintah yang dikirim ke AI dari tombol "Rapikan pakai AI" di editor figur.
 
@@ -47,6 +48,10 @@ herdr-app status        # "errors" harus kosong
    (isi `~/.config/herdr-app` dan `~/.claude/settings.json`). Kalau backup gagal, pemasangan dibatalkan.
 2. Menyalin `layouts/pixel-hq.json`, `themes/pixel-hq.json`, dan semua mod `company-*`
    ke `~/.config/herdr-app`. Mod `company-*` yang sudah ada **ditimpa**, file lain tidak disentuh.
+   Lalu menambahkan hotkey Kanban (`ctrl-shift-j`) dan Usage (`ctrl-shift-m`) ke `keys.json`, di bagian
+   `layout:pixel-hq` (jadi cuma aktif di layout ini). Tombol yang sudah kamu pakai buat hal lain gak ditimpa,
+   cuma dilewati dengan pesan. Catatan: Herdr berhenti menambahkan shortcut bawaan baru ke `keys.json`
+   yang pernah diubah; ini juga berlaku kalau kamu sendiri pernah mengubahnya.
 3. Kalau `~/.claude` ada:
    - menyalin `pixel-hq-statusline.sh` dan menambahkan `statusLine` ke `settings.json`
      **hanya kalau belum ada** (punyamu tidak ditimpa),
@@ -80,18 +85,21 @@ jadi ExecutionPolicy komputer tidak perlu diubah. Langkahnya sama dengan versi L
      butuh Python). StatusLine milikmu sendiri tidak ditimpa,
    - memasang hook aktivitas lewat `claude-activity.ps1 install` (hook lain dipertahankan,
      `settings.json` di-backup ke `settings.json.pixel-hq.bak`).
+4. Menambahkan hotkey Kanban dan Usage ke `keys.json`, sama seperti di Linux.
 
 Folder konfigurasi lain: `$env:HERDR_APP_HOME = "D:\herdr"; .\install.cmd`.
 
 Bedanya dengan Linux, semuanya versi PowerShell (`mods/company-agents/*.ps1`), bukan `sh` + Python:
 
-- **statusLine** (`claude-statusline.ps1`): isi dan label sama dengan `claude-statusline.sh`.
+- **statusLine** (`claude-statusline.ps1`): isi dan label sama dengan `claude-statusline.sh`, termasuk
+  riwayat usage (`claude-usage-history.json`) serta token dan biaya per sesi.
   Mod `company-agents` di Windows juga memakai skrip ini saat Herdr start, dengan perintah yang sama persis,
   jadi installer dan mod tidak saling timpa.
 - **Hook aktivitas** (`claude-activity.ps1`): matcher-nya `Bash|PowerShell` (Claude Code di Windows punya
   dua tool shell). PowerShell butuh beberapa ratus ms untuk start, jadi hook yang jalan di sekitar setiap
   perintah, subagent, dan giliran dipasang **`"async": true`** (Claude Code tidak menunggunya);
-  hanya `SessionStart`/`SessionEnd` yang sinkron.
+  hanya `SessionStart`/`SessionEnd` yang sinkron. Hook `Stop` juga menyimpan pesan terakhir agent buat kartu kanban.
+  Hook `Stop` yang dipasang versi lama tetap dikenali, jadi gak perlu pasang ulang hook buat fitur ini.
 - Perintahnya `powershell -NoProfile -ExecutionPolicy Bypass -File "C:/..."`, jalan baik saat Claude Code
   memakai Git Bash maupun PowerShell untuk hook.
 
@@ -104,15 +112,11 @@ Dua hal ini mengubah `~/.claude/settings.json`:
 - hook aktivitas: label terminal untuk animasi, dan pesan terakhir agent di akhir tiap giliran
   (`~/.local/state/pixel-hq/last/<terminal>.json`) buat ditampilkan di kartu kanban.
 
-Backup `settings.json` ada di langkah 1. `sh uninstall.sh` mencabut keduanya (lihat bawah). Di Windows:
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File "$env:USERPROFILE\.config\herdr-app\mods\company-agents\claude-activity.ps1" uninstall
-```
+Backup `settings.json` ada di langkah 1. `sh uninstall.sh` (Windows: `uninstall.cmd`) mencabut keduanya (lihat bawah).
 
 ## Cara pakai Kanban
 
-Buka lewat tombol **KANBAN** (bar atas = panel kanan, status bar = dialog lebar) atau palet perintah "Papan kanban".
+Buka lewat tombol **KANBAN** (bar atas = panel kanan, status bar = dialog lebar), `Ctrl+Shift+J`, atau palet perintah "Papan kanban".
 
 1. Isi judul (dan detail), lalu pilih:
    - **SPACE**: sesi/space yang mengerjakan,
@@ -125,13 +129,20 @@ Buka lewat tombol **KANBAN** (bar atas = panel kanan, status bar = dialog lebar)
 3. **KERJAKAN ▶** → pindah ke **Sedang dikerjakan**. Mesin (jalan tiap 3 detik selama Herdr terbuka):
    - mengirim `/model` dan `/effort` bila dipilih (hanya ke sesi Claude Code), lalu task-nya, lewat `hc send`,
    - menunggu kalau stafnya sibuk atau task yang ditunggu belum kelar,
-   - membuka tab Claude baru bila space itu belum punya agent,
+   - membuka tab Claude baru bila space itu belum punya agent (MODEL dan EFFORT ikut lewat `--model`/`--effort`),
    - memindahkan kartu ke **Selesai** saat staf kembali nganggur, dengan notifikasi dan durasinya,
    - **mengembalikan model/effort** staf ke setelan sebelum task (lewat `/model` dan `/effort` lagi),
    - menaruh **HASIL** (pesan terakhir agent) di kartu. Klik kotaknya untuk melihat lengkap.
 
 Di tiap kartu: **▲ ▼** mengubah urutan (di antara kartu dengan prioritas sama), **PRIO** mengganti prioritas,
 **ULANGI ↻** mengirim ulang task yang gagal atau sudah selesai.
+
+- **EDIT** (kartu di Antrean, atau yang gagal/dihentikan) mengisi form atas dengan isi task itu. Ubah judul, detail,
+  atau pilihannya, lalu **SIMPAN ✓** (atau **BATAL**). Di pilihan SETELAH, task yang nunggu task ini gak muncul,
+  jadi gak bisa bikin dua task saling nunggu. Task yang keburu jalan waktu kamu edit gak diubah.
+- **STOP ■** (kartu yang lagi dikerjakan) menyuruh agent berhenti, sama kayak menekan Esc di terminalnya.
+  Kartunya ditandai **DIHENTIKAN** (oranye, gak dihitung sebagai gagal), model/effort staf dikembalikan,
+  dan **ULANGI** mengirimnya lagi.
 
 **Task gagal** ditandai merah (kartu tetap di kolom "Sedang dikerjakan") kalau: pengiriman gagal 5 kali,
 stafnya hilang sebelum kelar, tab agent baru gak muncul dalam 1 menit, atau balasan agent berupa error
@@ -146,14 +157,18 @@ Data task ada di `~/.config/herdr-app/pixel-hq-kanban.json` (per komputer, tidak
 **Catatan:**
 - Model dikembalikan lewat alias (`opus`, `sonnet`, …) dari nama model yang dilaporkan statusline.
   Kalau sebelumnya kamu pakai versi model tertentu, hasilnya bisa versi terbaru dari keluarga yang sama.
-- Hasil kerja butuh hook aktivitas terpasang (otomatis lewat `install.sh`) dan Claude Code.
+- Hasil kerja butuh hook aktivitas terpasang (otomatis lewat `install.sh`/`install.cmd`) dan Claude Code.
+- Papan bisa diubah dari dialog waktu mesinnya lagi nulis. Keduanya saling menunggu dan menggabungkan perubahan,
+  jadi task gak terkirim dua kali dan klikmu gak hilang. Kalau kamu memindah atau mengulang task di saat yang sama,
+  pilihanmu yang dipakai.
 
 ## Usage Claude Code
 
 ![Usage Claude Code](docs/usage.png)
 
-- Chip **CLAUDE · SESI · MINGGU** di status bar. Arahkan kursor untuk waktu reset, klik untuk membuka dialog.
+- Chip **CLAUDE · SESI · MINGGU** di status bar. Arahkan kursor untuk waktu reset, klik (atau `Ctrl+Shift+M`) untuk membuka dialog.
 - **Notifikasi** saat sesi 5 jam atau minggu ini lewat **80%** dan **95%**, sekali per jendela usage.
+  Tombol **PERINGATAN** di dialog mengganti ambangnya: 80·95 → 70·90 → 50·80·95 → 90 → mati.
 - Dialog **Usage Claude**: grafik sesi 5 jam (24 jam terakhir) dan mingguan (14 hari),
   serta tabel **per staf** (model, context, token, biaya perkiraan) untuk sesi yang lagi terbuka.
   Bisa juga dibuka dari palet perintah: "Usage Claude".
@@ -182,22 +197,30 @@ Tombol update mengunduh `layouts/`, `themes/`, dan `mods/` dari repo ini, lalu H
 
 Buat yang merawat repo ini: **naikkan `version` di `mods/company-agents/version.json`** setiap merilis perubahan,
 kalau gak, updater gak tahu ada versi baru. Update lewat tombol gak menyentuh `~/.claude/settings.json`;
-kalau ada perubahan hook atau statusline, jalankan `sh install.sh`.
+kalau ada perubahan hook, statusline, atau hotkey, jalankan `sh install.sh` (Windows: `install.cmd`).
 
 ## Mencopot / memulihkan
 
 ```sh
-sh uninstall.sh                  # copot mod, layout, tema, hook, dan statusLine Pixel HQ (data disimpan)
+sh uninstall.sh                  # copot mod, layout, tema, hook, statusLine, dan hotkey Pixel HQ (data disimpan)
 sh uninstall.sh --purge          # sekalian hapus data kanban dan riwayat usage
 sh uninstall.sh --restore        # kembalikan kondisi dari backup terbaru yang dibuat install.sh
 sh uninstall.sh --restore FILE   # dari backup tertentu (daftarnya: ls ~/backups/herdr/)
 ```
 
 Sebelum mengubah apa pun, `uninstall.sh` juga membackup kondisi sekarang ke
-`~/backups/herdr/sebelum-uninstall-pixelhq-<waktu>.tar.gz`. Hook dan `statusLine` lain milikmu gak disentuh.
+`~/backups/herdr/sebelum-uninstall-pixelhq-<waktu>.tar.gz`. Hook, `statusLine`, dan hotkey lain milikmu gak disentuh.
 
-Windows belum punya `uninstall`; pulihkan dari backup installer (ganti `<waktu>` dengan nama file backup-nya):
-`Expand-Archive "$env:USERPROFILE\backups\herdr\sebelum-custom-pixelhq-<waktu>.zip" -DestinationPath $env:USERPROFILE -Force`
+Windows (klik dua kali `uninstall.cmd`, atau dari terminal dengan pilihannya):
+
+```powershell
+.\uninstall.cmd                    # copot mod, layout, tema, hook, statusLine, dan hotkey Pixel HQ (data disimpan)
+.\uninstall.cmd -Purge             # sekalian hapus data kanban dan riwayat usage
+.\uninstall.cmd -Restore           # kembalikan kondisi dari backup terbaru yang dibuat install.cmd
+.\uninstall.cmd -Restore FILE.zip  # dari backup tertentu (daftarnya: dir %USERPROFILE%\backups\herdr)
+```
+
+Sama seperti versi Linux, kondisi sekarang di-backup dulu ke `%USERPROFILE%\backups\herdr\sebelum-uninstall-pixelhq-<waktu>.zip`.
 
 Kembali ke Pixel HQ asli: `sh uninstall.sh`, lalu pasang dari <https://github.com/bnhan2710/pixel-hq>.
 
@@ -210,6 +233,7 @@ mods/company-*/           mod Pixel HQ + perubahan lokal
 mods/company-usage/       dialog usage Claude (riwayat dan per staf)
 install.sh / uninstall.sh pasang, copot, pulihkan (Linux/macOS)
 install.cmd, install.ps1  pemasang Windows
+uninstall.cmd, .ps1       copot dan pulihkan di Windows
 docs/                     gambar README
 ```
 
@@ -218,9 +242,8 @@ docs/                     gambar README
 - Fitur kanban, usage, dan nama staf diuji di Linux (WSL2 dan Linux desktop). Pesan `MESA/EGL` di WSL itu noise GPU, bukan error.
 - Installer Windows diuji di Windows 11 (PowerShell 5.1) dengan folder home tiruan: backup, salin mod, statusLine, dan hook
   (termasuk lewat Git Bash, cmd, dan PowerShell), tapi belum di sesi Claude Code sungguhan.
-- **Di Windows, sebagian fitur baru belum jalan**: `claude-statusline.ps1` dan `claude-activity.ps1` belum ikut diperbarui,
-  jadi **HASIL kerja di kartu kanban**, **grafik riwayat usage**, dan **token/biaya per staf** belum terisi di sana.
-  Kanban, nama staf, notifikasi usage 80%/95%, dan terjemahan tetap jalan.
+- **Versi Windows untuk HASIL kerja, riwayat usage, token/biaya per staf, hotkey, dan `uninstall.ps1` belum dicoba di Windows.**
+  Kodenya mengikuti versi Linux, tapi belum pernah dijalankan di PowerShell. Kalau ada yang error, kabari lewat issue.
 - Di Windows, sebagian fitur bawaan Pixel HQ yang memakai `sh`/`python3` (worktree crew, plugin Hermes,
   vitals Codex/Antigravity) tetap butuh alat itu; installer ini tidak mengubahnya.
 

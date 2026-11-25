@@ -3,6 +3,8 @@
 // Sudah terkirim -> pantau; kalau agent-nya balik idle/done, task pindah ke "selesai".
 // Tambahan: urutan prioritas, task yang nunggu task lain, batas waktu, status gagal, hasil kerja dari hook Stop
 // (claude-activity.py), dan model/effort staf dikembalikan ke setelan sebelumnya setelah task kelar.
+// Tombol STOP di kartu cuma menandai `stopWanted`; mesin ini yang menekan tombol stop agent (hc interrupt),
+// supaya gak balapan dengan pengecekan "staf udah nganggur = task kelar".
 import { agents, terminals, shared, hc, run, appHome, home, readTextFile, writeTextFile, notify } from "herdr";
 
 const file = () => `${appHome()}/pixel-hq-kanban.json`;
@@ -32,6 +34,31 @@ const labelsOf = (addr) => { try { return terminals().find((x) => x.address === 
 const isFree = (a) => a.status === "idle" || a.status === "done";
 // Jawaban yang jelas-jelas error dari Claude Code, bukan hasil kerja.
 const AGENT_ERROR = /^(API Error|Claude AI usage limit reached|.*usage limit reached)/i;
+// Perintah buat ngembaliin model/effort staf ke setelan sebelum task.
+const backOf = (t) => [t.prevModel && `/model ${t.prevModel}`, t.prevEffort && `/effort ${t.prevEffort}`].filter(Boolean);
+// Agent baru buat space yang belum punya staf: model/effort langsung lewat argumen claude (--model, --effort).
+export const newAgentArgv = (t) => ["claude", ...(t.model ? ["--model", t.model] : []), ...(t.effort ? ["--effort", t.effort] : [])];
+
+// Perubahan satu task dari `a` ke `b`: kunci yang diisi/diubah dan kunci yang dibuang. null kalau sama.
+export function patchOf(a, b) {
+  const set = {}, del = [];
+  for (const k of Object.keys(b)) if (JSON.stringify(a[k]) !== JSON.stringify(b[k])) set[k] = b[k];
+  for (const k of Object.keys(a)) if (!(k in b)) del.push(k);
+  return Object.keys(set).length || del.length ? { set, del } : null;
+}
+
+// Terapkan perubahan mesin ke isi file yang lebih baru (yang barusan ditulis dialog kanban).
+// Task yang dihapus, dipindah kolom, atau diulang sejak mesin membacanya dilewati: pilihan kamu menang.
+// Perubahan lain dari dialog (prioritas, urutan, STOP) tetap ada, karena cuma kunci yang diubah mesin yang ditimpa.
+export function mergeInto(fresh, patches) {
+  for (const { id, before, patch } of patches) {
+    const cur = fresh.tasks.find((x) => x.id === id);
+    if (!cur || cur.column !== before.column || cur.startedAt !== before.startedAt) continue;
+    for (const k of patch.del) delete cur[k];
+    Object.assign(cur, patch.set);
+  }
+  return fresh;
+}
 
 export class KanbanEngine {
   constructor() { this.busy = false; this.counts = { todo: 0, doing: 0, failed: 0 }; }
@@ -44,6 +71,7 @@ export class KanbanEngine {
       if (!raw) return false;
       let d; try { d = JSON.parse(raw); } catch { return false; }
       if (!Array.isArray(d.tasks)) return false;
+      const before = new Map(JSON.parse(raw).tasks.map((t) => [t?.id, t])); // salinan buat tahu apa yang diubah mesin
       const now = Date.now(), ag = agents(), name = staffName;
       const byId = new Map(d.tasks.map((t) => [t.id, t]));
       // staf yang lagi dipakai: task jalan yang sudah pegang staf, atau yang masih nunggu model/effort-nya dikembalikan
@@ -57,10 +85,21 @@ export class KanbanEngine {
       const missed = (t, why) => { t.tries = (t.tries ?? 0) + 1; changed = true; if (t.tries >= MAX_TRIES) fail(t, `${why} (${MAX_TRIES}x)`); else note(t, `${why}, nyoba lagi…`); };
 
       for (const t of d.tasks.filter((x) => x.column === "doing" && !x.failed).sort(sortTasks)) {
+        if (t.stopWanted) {
+          // diminta berhenti dari tombol STOP: tekan tombol stop agent kalau task-nya udah dikirim
+          delete t.stopWanted;
+          const a = t.agent ? ag.find((x) => x.address === t.agent) : null;
+          if (a && t.sentAt) await hc(["interrupt", a.address]).catch(() => null);
+          t.failed = "Dihentikan"; t.stopped = true; t.failedAt = now; changed = true;
+          note(t, a ? `Dihentikan, ${name(a)} disuruh berhenti` : "Dihentikan");
+          const back = backOf(t);
+          if (a && back.length) t.restore = back;
+          continue;
+        }
         if (!t.sentAt) {
           if (t.after) {
             const dep = byId.get(t.after);
-            if (dep && dep.column !== "done") { note(t, dep.failed ? `Nunggu "${dep.title.slice(0, 30)}" (gagal, ulangi dulu)` : `Nunggu "${dep.title.slice(0, 30)}" kelar dulu`); continue; }
+            if (dep && dep.column !== "done") { note(t, dep.failed ? `Nunggu "${dep.title.slice(0, 30)}" (${dep.stopped ? "dihentikan" : "gagal"}, ulangi dulu)` : `Nunggu "${dep.title.slice(0, 30)}" kelar dulu`); continue; }
           }
           const want = t.target ? ag.find((a) => a.address === t.target && a.space === t.space) : null;
           if (t.target && !want) { delete t.target; delete t.targetName; note(t, "Staf pilihan udah ilang, pindah ke otomatis"); changed = true; }
@@ -88,7 +127,7 @@ export class KanbanEngine {
           } else if (staged) note(t, `Nunggu ${name(staged)} kosong…`);
           else if (want) note(t, `Nunggu ${name(want)} kosong…`);
           else if (!ag.some((a) => a.space === t.space)) {
-            run("tab.new", { space: t.space, name: t.title.slice(0, 40), argv: ["claude"], task: textOf(t) });
+            run("tab.new", { space: t.space, name: t.title.slice(0, 40), argv: newAgentArgv(t), task: textOf(t) });
             t.sentAt = now; t.byTab = t.title.slice(0, 40); note(t, "Buka agent Claude baru"); changed = true;
           } else note(t, "Nunggu staf di space ini kosong…");
           continue;
@@ -108,7 +147,7 @@ export class KanbanEngine {
         else if (a.status === "blocked") note(t, `${name(a)} nunggu jawaban kamu`);
         else if (t.seen || now - t.sentAt > 120000) {
           t.column = "done"; t.finishedAt = now; t.resultWanted = true; note(t, `Kelar oleh ${name(a)}`); changed = true;
-          const back = [t.prevModel && `/model ${t.prevModel}`, t.prevEffort && `/effort ${t.prevEffort}`].filter(Boolean);
+          const back = backOf(t);
           if (back.length) t.restore = back;
           try { notify({ title: "Task kelar", body: `${t.title} · ${fmtDur(now - t.sentAt)}`, level: "info" }); } catch {}
         }
@@ -138,10 +177,30 @@ export class KanbanEngine {
       this.counts = {
         todo: d.tasks.filter((x) => x.column === "todo").length,
         doing: d.tasks.filter((x) => x.column === "doing" && !x.failed).length,
-        failed: d.tasks.filter((x) => x.failed).length,
+        failed: d.tasks.filter((x) => x.failed && !x.stopped).length,
       };
-      if (changed) await writeTextFile(file(), JSON.stringify(d, null, 2), raw).catch(() => {});
+      if (changed) await this.save(raw, d, before);
       return changed;
     } finally { this.busy = false; }
+  }
+
+  // Simpan hasil satu putaran. Kalau file udah diubah dialog kanban sejak dibaca (writeTextFile menolak),
+  // baca ulang dan terapkan lagi perubahan mesin di atasnya. Dulu perubahan itu dibuang, jadi task yang barusan
+  // dikirim (hc send) kehilangan tanda `sentAt` dan dikirim lagi di putaran berikutnya.
+  async save(raw, d, before) {
+    const patches = [];
+    for (const t of d.tasks) {
+      const b = before.get(t.id), patch = b && patchOf(b, t);
+      if (patch) patches.push({ id: t.id, before: b, patch });
+    }
+    let text = JSON.stringify(d, null, 2), expected = raw;
+    for (let i = 0; i < 5; i++) {
+      try { await writeTextFile(file(), text, expected); return true; } catch {}
+      expected = await readTextFile(file()).catch(() => null);
+      let fresh = null; try { fresh = expected ? JSON.parse(expected) : null; } catch {}
+      if (!Array.isArray(fresh?.tasks)) return false;
+      text = JSON.stringify(mergeInto(fresh, patches), null, 2);
+    }
+    return false;
   }
 }

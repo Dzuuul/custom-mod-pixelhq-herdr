@@ -26,7 +26,15 @@ const COLS = [
   { id: "done", label: "SELESAI", color: "#a6e3a1" },
 ];
 // Field yang diisi mesin selama task jalan; dibuang tiap task dipindah atau diulang.
-const RUNTIME = ["sentAt", "agent", "seen", "byTab", "finishedAt", "preIdx", "prevSaved", "prevModel", "prevEffort", "tries", "failed", "failedAt", "overdue", "result", "resultWanted", "startedAt"];
+const RUNTIME = ["sentAt", "agent", "seen", "byTab", "finishedAt", "preIdx", "prevSaved", "prevModel", "prevEffort", "tries", "failed", "failedAt", "overdue", "result", "resultWanted", "startedAt", "stopWanted", "stopped"];
+// Pilihan task yang boleh kosong; dibuang dulu tiap task disimpan dari form, lalu diisi lagi yang dipilih.
+const OPTIONAL = ["model", "effort", "priority", "limitMin", "after", "afterTitle", "target", "targetName"];
+// Apakah `t` (lewat rantai "SETELAH") nunggu task `id`. Dipakai biar edit gak bikin task saling nunggu selamanya.
+const waitsFor = (t, id, byId) => {
+  const seen = new Set();
+  for (let x = t; x?.after && !seen.has(x.id); x = byId.get(x.after)) { if (x.after === id) return true; seen.add(x.id); }
+  return false;
+};
 // Sama dengan company-status/kanban.js (mod gak bisa impor dari folder mod lain).
 const PRI = { tinggi: 0, normal: 1, rendah: 2 };
 const sortTasks = (a, b) => (PRI[a.priority ?? "normal"] - PRI[b.priority ?? "normal"]) || ((a.order ?? a.created) - (b.order ?? b.created));
@@ -42,13 +50,17 @@ const sortedIn = (tasks, col) => {
   return col === "done" ? l.sort((a, b) => (b.finishedAt ?? 0) - (a.finishedAt ?? 0)) : l.sort(sortTasks);
 };
 
+// Baca, ubah, tulis. Kalau mesin kanban nulis di sela-selanya (writeTextFile menolak), baca ulang dan ulangi
+// `fn` di atas isi yang baru, jadi klik kamu gak hilang diam-diam. `fn` harus aman dijalankan ulang.
 async function mutate(fn) {
-  const raw = await readTextFile(file()).catch(() => null);
-  let d; try { d = raw ? JSON.parse(raw) : null; } catch { d = null; }
-  d = d && Array.isArray(d.tasks) ? d : { tasks: [] };
-  fn(d);
-  await writeTextFile(file(), JSON.stringify(d, null, 2), raw);
-  return d;
+  for (let i = 0; ; i++) {
+    const raw = await readTextFile(file()).catch(() => null);
+    let d; try { d = raw ? JSON.parse(raw) : null; } catch { d = null; }
+    d = d && Array.isArray(d.tasks) ? d : { tasks: [] };
+    fn(d);
+    try { await writeTextFile(file(), JSON.stringify(d, null, 2), raw); return d; }
+    catch (e) { if (i >= 4) throw e; }
+  }
 }
 
 function toMarkdown(tasks) {
@@ -56,7 +68,7 @@ function toMarkdown(tasks) {
   for (const c of COLS) {
     out.push(`## ${c.label} (${tasks.filter((t) => t.column === c.id).length})`, ``);
     for (const t of sortedIn(tasks, c.id)) {
-      const tags = [t.spaceName, t.priority && t.priority !== "normal" && `prioritas ${t.priority}`, t.model, t.effort, t.targetName, t.failed && `GAGAL: ${t.failed}`,
+      const tags = [t.spaceName, t.priority && t.priority !== "normal" && `prioritas ${t.priority}`, t.model, t.effort, t.targetName, t.failed && (t.stopped ? "DIHENTIKAN" : `GAGAL: ${t.failed}`),
         t.sentAt && t.finishedAt && `durasi ${fmtDur(t.finishedAt - t.sentAt)}`].filter(Boolean);
       out.push(`- [${c.id === "done" ? "x" : " "}] **${t.title}**${tags.length ? ` (${tags.join(", ")})` : ""}`);
       if (t.detail) out.push(`  ${t.detail.replace(/\n/g, "\n  ")}`);
@@ -78,6 +90,7 @@ export default class Kanban extends View {
     this.priIdx = 0;
     this.limitIdx = 0;
     this.afterIdx = 0;
+    this.editing = null; // id task yang lagi diedit di form, atau null (form bikin task baru)
     this.open = new Set(); // kartu yang hasil kerjanya dibuka penuh
     this.msg = "";
     const load = (cx) => cx.spawn(async (cx) => {
@@ -107,90 +120,151 @@ export default class Kanban extends View {
     const sp = this.space();
     return sp ? agents().filter((a) => a.space === sp.id) : [];
   }
-  // task yang bisa ditunggu: yang belum selesai; indeks 0 = gak nunggu siapa-siapa
-  afterChoices() { return this.tasks.filter((x) => x.column !== "done").sort(sortTasks); }
+  // task yang bisa ditunggu: yang belum selesai; indeks 0 = gak nunggu siapa-siapa.
+  // Waktu ngedit, task itu sendiri dan task yang (lewat rantai) nunggu dia gak bisa dipilih.
+  afterChoices() {
+    const byId = new Map(this.tasks.map((x) => [x.id, x])), id = this.editing;
+    return this.tasks.filter((x) => x.column !== "done" && (!id || (x.id !== id && !waitsFor(x, id, byId)))).sort(sortTasks);
+  }
   agentLabel(a) { return staffName(a); }
   say(text, cx) { this.msg = text; this.msgAt = Date.now(); cx.notify(); }
 
-  add(cx) {
-    const title = this.title.value().trim(), sp = this.space();
-    if (!title || !sp) return;
-    const now = Date.now();
-    const task = { id: `k${now.toString(36)}${Math.random().toString(36).slice(2, 5)}`, title, detail: this.detail.value().trim(), space: sp.id, spaceName: sp.name, column: "todo", created: now, order: now };
+  // Baca-ubah-tulis papan, lalu tampilkan hasilnya. Gagal nyimpan = pesan di atas papan, bukan diam-diam.
+  change(fn, cx) {
+    cx.spawn(async (cx) => {
+      try { const d = await mutate(fn); this.tasks = d.tasks; cx.notify(); }
+      catch (e) { this.say(`Gagal nyimpan papan: ${e?.message ?? e}`, cx); }
+    });
+  }
+
+  // Pilihan form sekarang, sebagai field task (yang kosong gak diisi).
+  formFields(sp) {
+    const f = {};
     const pick = this.choices()[this.agentIdx - 1];
-    if (this.modelIdx) task.model = MODELS[this.modelIdx - 1];
-    if (this.effortIdx) task.effort = EFFORTS[this.effortIdx - 1];
-    if (this.priIdx) task.priority = PRIORITIES[this.priIdx];
-    if (this.limitIdx) task.limitMin = LIMITS[this.limitIdx];
+    if (this.modelIdx) f.model = MODELS[this.modelIdx - 1];
+    if (this.effortIdx) f.effort = EFFORTS[this.effortIdx - 1];
+    if (this.priIdx) f.priority = PRIORITIES[this.priIdx];
+    if (this.limitIdx) f.limitMin = LIMITS[this.limitIdx];
     const dep = this.afterChoices()[this.afterIdx - 1];
-    if (dep) { task.after = dep.id; task.afterTitle = dep.title; }
-    if (pick) { task.target = pick.address; task.targetName = this.agentLabel(pick); }
-    this.title.set_value(""); this.detail.set_value(""); this.afterIdx = 0;
-    cx.spawn(async (cx) => { const d = await mutate((d) => d.tasks.push(task)); this.tasks = d.tasks; cx.notify(); });
+    if (dep) { f.after = dep.id; f.afterTitle = dep.title; }
+    if (pick) { f.target = pick.address; f.targetName = this.agentLabel(pick); }
+    return { title: this.title.value().trim(), detail: this.detail.value().trim(), space: sp.id, spaceName: sp.name, ...f };
+  }
+
+  resetForm() { this.editing = null; this.title.set_value(""); this.detail.set_value(""); this.afterIdx = 0; }
+
+  add(cx) {
+    const sp = this.space();
+    if (!this.title.value().trim() || !sp) return;
+    if (this.editing) return this.saveEdit(cx);
+    const now = Date.now();
+    const task = { id: `k${now.toString(36)}${Math.random().toString(36).slice(2, 5)}`, ...this.formFields(sp), column: "todo", created: now, order: now };
+    this.resetForm();
+    this.change((d) => d.tasks.push(task), cx);
+  }
+
+  // Isi form dengan task yang mau diubah. Bisa buat task di Antrean dan task yang gagal/dihentikan.
+  startEdit(task, cx) {
+    this.editing = task.id;
+    this.title.set_value(task.title ?? "");
+    this.detail.set_value(task.detail ?? "");
+    const si = spaces().findIndex((s) => s.id === task.space);
+    if (si >= 0) this.spaceIdx = si;
+    const ai = task.target ? this.choices().findIndex((a) => a.address === task.target) : -1;
+    this.agentIdx = ai + 1;
+    this.modelIdx = task.model ? MODELS.indexOf(task.model) + 1 : 0;
+    this.effortIdx = task.effort ? EFFORTS.indexOf(task.effort) + 1 : 0;
+    this.priIdx = Math.max(0, PRIORITIES.indexOf(task.priority ?? "normal"));
+    this.limitIdx = Math.max(0, LIMITS.indexOf(task.limitMin ?? 0));
+    this.afterIdx = task.after ? this.afterChoices().findIndex((x) => x.id === task.after) + 1 : 0;
+    this.title.focus();
+    const lost = [si < 0 && `space "${task.spaceName ?? "?"}"`, task.target && ai < 0 && `staf ${task.targetName ?? "?"}`].filter(Boolean);
+    this.say(lost.length ? `Ngedit "${task.title.slice(0, 40)}". ${lost.join(" dan ")} udah gak ada, pilih lagi.` : `Ngedit "${task.title.slice(0, 40)}". SIMPAN kalau udah, BATAL buat batal.`, cx);
+  }
+
+  cancelEdit(cx) { this.resetForm(); this.say("Edit dibatalin.", cx); }
+
+  saveEdit(cx) {
+    const id = this.editing, f = this.formFields(this.space());
+    let result = "";
+    this.resetForm();
+    cx.spawn(async (cx) => {
+      try {
+        const d = await mutate((d) => {
+          const t = d.tasks.find((x) => x.id === id);
+          if (!t) { result = "Task-nya udah dihapus, gak jadi diubah."; return; }
+          if (t.column !== "todo" && !t.failed) { result = "Task-nya keburu jalan, gak jadi diubah."; return; }
+          for (const k of OPTIONAL) delete t[k];
+          Object.assign(t, f);
+          if (t.failed) t.note = "Diubah. Klik ULANGI buat kirim lagi.";
+          result = "Task disimpan.";
+        });
+        this.tasks = d.tasks;
+        this.say(result, cx);
+      } catch (e) { this.say(`Gagal nyimpan papan: ${e?.message ?? e}`, cx); }
+    });
   }
 
   move(id, column, cx) {
-    cx.spawn(async (cx) => {
-      const d = await mutate((d) => {
-        const t = d.tasks.find((x) => x.id === id); if (!t) return;
-        t.column = column;
-        for (const k of RUNTIME) delete t[k];
-        delete t.restore; // perintah pemulihan yang belum terkirim ikut batal kalau task dipindah manual
-        t.note = column === "doing" ? "Nunggu dikirim ke agent…" : "";
-        if (column === "doing") t.startedAt = Date.now();
-      });
-      this.tasks = d.tasks; cx.notify();
-    });
+    if (this.editing === id) this.resetForm();
+    this.change((d) => {
+      const t = d.tasks.find((x) => x.id === id); if (!t) return;
+      t.column = column;
+      for (const k of RUNTIME) delete t[k];
+      delete t.restore; // perintah pemulihan yang belum terkirim ikut batal kalau task dipindah manual
+      t.note = column === "doing" ? "Nunggu dikirim ke agent…" : "";
+      if (column === "doing") t.startedAt = Date.now();
+    }, cx);
   }
 
   retry(id, cx) {
-    cx.spawn(async (cx) => {
-      const d = await mutate((d) => {
-        const t = d.tasks.find((x) => x.id === id); if (!t) return;
-        for (const k of RUNTIME) delete t[k];
-        t.column = "doing"; t.startedAt = Date.now(); t.note = "Diulang, nunggu dikirim ke agent…";
-      });
-      this.tasks = d.tasks; cx.notify();
-    });
+    if (this.editing === id) this.resetForm();
+    this.change((d) => {
+      const t = d.tasks.find((x) => x.id === id); if (!t) return;
+      for (const k of RUNTIME) delete t[k];
+      t.column = "doing"; t.startedAt = Date.now(); t.note = "Diulang, nunggu dikirim ke agent…";
+    }, cx);
+  }
+
+  // Minta mesin kanban menghentikan task yang lagi dikerjakan (tombol stop agent, sama kayak Esc).
+  // Mesinnya yang menekan, biar gak keburu dianggap "kelar" waktu agent berhenti.
+  stop(id, cx) {
+    this.change((d) => {
+      const t = d.tasks.find((x) => x.id === id);
+      if (!t || t.column !== "doing" || t.failed) return;
+      t.stopWanted = true; t.note = "Menghentikan…";
+    }, cx);
   }
 
   // geser kartu satu langkah di kolomnya (hanya di antara kartu dengan prioritas yang sama)
   nudge(id, dir, cx) {
-    cx.spawn(async (cx) => {
-      const d = await mutate((d) => {
-        const t = d.tasks.find((x) => x.id === id); if (!t) return;
-        const list = sortedIn(d.tasks, t.column), i = list.indexOf(t), o = list[i + dir];
-        if (!o || (o.priority ?? "normal") !== (t.priority ?? "normal")) return;
-        const a = t.order ?? t.created, b = o.order ?? o.created;
-        t.order = b; o.order = a === b ? a - dir : a;
-      });
-      this.tasks = d.tasks; cx.notify();
-    });
+    this.change((d) => {
+      const t = d.tasks.find((x) => x.id === id); if (!t) return;
+      const list = sortedIn(d.tasks, t.column), i = list.indexOf(t), o = list[i + dir];
+      if (!o || (o.priority ?? "normal") !== (t.priority ?? "normal")) return;
+      const a = t.order ?? t.created, b = o.order ?? o.created;
+      t.order = b; o.order = a === b ? a - dir : a;
+    }, cx);
   }
 
   cyclePriority(id, cx) {
-    cx.spawn(async (cx) => {
-      const d = await mutate((d) => {
-        const t = d.tasks.find((x) => x.id === id); if (!t) return;
-        t.priority = PRIORITIES[(PRIORITIES.indexOf(t.priority ?? "normal") + 1) % PRIORITIES.length];
-        if (t.priority === "normal") delete t.priority;
-      });
-      this.tasks = d.tasks; cx.notify();
-    });
+    this.change((d) => {
+      const t = d.tasks.find((x) => x.id === id); if (!t) return;
+      t.priority = PRIORITIES[(PRIORITIES.indexOf(t.priority ?? "normal") + 1) % PRIORITIES.length];
+      if (t.priority === "normal") delete t.priority;
+    }, cx);
   }
 
   remove(id, cx) {
-    cx.spawn(async (cx) => {
-      const d = await mutate((d) => {
-        d.tasks = d.tasks.filter((x) => x.id !== id);
-        for (const t of d.tasks) if (t.after === id) { delete t.after; delete t.afterTitle; }
-      });
-      this.tasks = d.tasks; cx.notify();
-    });
+    if (this.editing === id) this.resetForm();
+    this.change((d) => {
+      d.tasks = d.tasks.filter((x) => x.id !== id);
+      for (const t of d.tasks) if (t.after === id) { delete t.after; delete t.afterTitle; }
+    }, cx);
   }
 
   clearDone(cx) {
-    cx.spawn(async (cx) => { const d = await mutate((d) => { d.tasks = d.tasks.filter((x) => x.column !== "done" || x.restore?.length); }); this.tasks = d.tasks; cx.notify(); });
+    this.change((d) => { d.tasks = d.tasks.filter((x) => x.column !== "done" || x.restore?.length); }, cx);
   }
 
   exportBoard(cx) {
@@ -218,6 +292,7 @@ export default class Kanban extends View {
         const sp = spaces(), here = this.space();
         let added = 0, moved = 0;
         const d = await mutate((d) => {
+          added = 0; moved = 0; // mutate bisa mengulang fungsi ini kalau mesin kanban nulis di sela-selanya
           const have = new Set(d.tasks.map((x) => x.id));
           for (const src of incoming) {
             if (!src || typeof src.title !== "string" || !src.title.trim() || have.has(src.id)) continue;
@@ -262,9 +337,14 @@ export default class Kanban extends View {
     const result = task.result ?? "";
     const opened = this.open.has(task.id);
     const shown = opened ? result : result.split("\n").filter((l) => l.trim()).slice(0, 3).join("\n").slice(0, 280);
-    return v_flex().id(`card-${task.id}`).gap(5).p(9).bg(t.surface).border_1().border_color(task.failed ? "#f38ba8" : task.overdue ? "#f9b84a" : t.border).rounded(6)
+    const editing = this.editing === task.id;
+    const canEdit = task.column === "todo" || Boolean(task.failed);
+    const canStop = task.column === "doing" && Boolean(task.sentAt && task.agent) && !task.failed && !task.stopWanted;
+    const edge = editing ? "#89b4fa" : task.stopped ? "#fab387" : task.failed ? "#f38ba8" : task.overdue ? "#f9b84a" : t.border;
+    return v_flex().id(`card-${task.id}`).gap(5).p(9).bg(t.surface).border_1().border_color(edge).rounded(6)
       .child(h_flex().gap(6).items_center()
-        .when(Boolean(task.failed), (el) => el.child(this.tag("GAGAL", "#f38ba8")))
+        .when(Boolean(task.failed), (el) => el.child(task.stopped ? this.tag("DIHENTIKAN", "#fab387") : this.tag("GAGAL", "#f38ba8")))
+        .when(editing, (el) => el.child(this.tag("LAGI DIEDIT", "#89b4fa")))
         .child(div().flex_1().min_w(0).text_size(12.5).font_semibold().text_color(t.foreground).child(task.title)))
       .when(Boolean(task.detail), (el) => el.child(div().text_size(11).text_color(t.muted).child(task.detail)))
       .child(h_flex().gap(6).items_center().flex_wrap()
@@ -277,16 +357,19 @@ export default class Kanban extends View {
         .when(Boolean(!dur && task.limitMin), (el) => el.child(this.tag(`batas ${task.limitMin} mnt`, t.muted)))
         .when(Boolean(task.overdue && task.column === "doing"), (el) => el.child(this.tag("LEWAT BATAS", "#f9b84a")))
         .when(Boolean(task.restore?.length), (el) => el.child(this.tag("ngembaliin model…", "#cba6f7"))))
-      .when(Boolean(task.note), (el) => el.child(div().text_size(10).text_color(task.failed ? "#f38ba8" : task.column === "doing" ? "#f9b84a" : t.dim).child(task.note)))
+      .when(Boolean(task.note), (el) => el.child(div().text_size(10).text_color(task.stopped ? "#fab387" : task.failed ? "#f38ba8" : task.column === "doing" ? "#f9b84a" : t.dim).child(task.note)))
       .when(Boolean(result), (el) => el.child(v_flex().id(`hasil-${task.id}`).gap(3).p(7).bg(t.background).rounded(4).cursor_pointer()
         .tooltip(opened ? "Klik buat ringkas" : "Klik buat lihat hasil lengkap")
         .on_click((_e, cx) => { if (opened) this.open.delete(task.id); else this.open.add(task.id); cx.notify(); })
         .child(div().text_size(9.5).font_bold().text_color("#a6e3a1").child(opened ? "HASIL ▾" : "HASIL ▸"))
         .child(div().text_size(10.5).text_color(t.muted).child(shown + (!opened && shown.length < result.length ? " …" : "")))))
-      .child(h_flex().gap(4)
+      .child(h_flex().gap(4).flex_wrap()
         .when(i > 0, (el) => el.child(this.btn(`l-${task.id}`, "◀", t.muted, (cx) => this.move(task.id, COLS[i - 1].id, cx), `Pindah ke ${COLS[i - 1].label.toLowerCase()}`)))
         .when(i < COLS.length - 1, (el) => el.child(this.btn(`r-${task.id}`, i === 0 ? "KERJAKAN ▶" : "▶", i === 0 ? "#f9b84a" : t.muted, (cx) => this.move(task.id, COLS[i + 1].id, cx), i === 0 ? "Pindah ke sedang dikerjakan: agent di space ini langsung ngerjain" : `Pindah ke ${COLS[i + 1].label.toLowerCase()}`)))
+        .when(canStop, (el) => el.child(this.btn(`s-${task.id}`, "STOP ■", "#fab387", (cx) => this.stop(task.id, cx), "Suruh agent berhenti ngerjain task ini (tombol stop, sama kayak Esc). Kartunya ditandai dihentikan; ULANGI buat kirim lagi.")))
+        .when(Boolean(task.stopWanted && task.column === "doing"), (el) => el.child(this.tag("menghentikan…", "#fab387")))
         .when(Boolean(task.failed) || task.column === "done", (el) => el.child(this.btn(`u-${task.id}`, "ULANGI ↻", "#f38ba8", (cx) => this.retry(task.id, cx), "Kirim ulang task ini ke agent")))
+        .when(canEdit && !editing, (el) => el.child(this.btn(`e-${task.id}`, "EDIT", "#89b4fa", (cx) => this.startEdit(task, cx), "Ubah judul, detail, dan pilihan task ini di form atas")))
         .when(canUp, (el) => el.child(this.btn(`up-${task.id}`, "▲", t.muted, (cx) => this.nudge(task.id, -1, cx), "Naikkan urutan")))
         .when(canDown, (el) => el.child(this.btn(`dn-${task.id}`, "▼", t.muted, (cx) => this.nudge(task.id, 1, cx), "Turunkan urutan")))
         .when(task.column !== "done", (el) => el.child(this.btn(`p-${task.id}`, "PRIO", PRI_COLOR[task.priority ?? "normal"] ?? t.muted, (cx) => this.cyclePriority(task.id, cx), "Ganti prioritas: normal → tinggi → rendah")))
@@ -328,8 +411,11 @@ export default class Kanban extends View {
     const dep = deps[this.afterIdx - 1];
     const afterBtn = cyc("pilih-setelah", `SETELAH: ${dep ? dep.title.slice(0, 18) : "-"} ▾`, this.afterIdx,
       "Task ini baru dikirim setelah task yang dipilih masuk Selesai. Klik buat ganti.", () => { this.afterIdx = (this.afterIdx + 1) % (this.afterChoices().length + 1); }, "#89dceb");
-    const addBtn = div().id("tambah").h(30).px(12).flex().items_center().cursor_pointer().bg("#89b4fa").text_color(t.chrome).rounded(5).text_size(11).font_bold()
-      .hover((s) => s.opacity(0.85)).on_click((_e, cx) => this.add(cx)).child("+ TAMBAH");
+    const addBtn = h_flex().gap(6)
+      .when(Boolean(this.editing), (el) => el.child(div().id("batal-edit").h(30).px(10).flex().items_center().cursor_pointer().bg(t.raised).text_color(t.muted).rounded(5).text_size(11).font_bold()
+        .hover((s) => s.bg(t.hover)).tooltip("Batal ngedit, form kosong lagi").on_click((_e, cx) => this.cancelEdit(cx)).child("BATAL")))
+      .child(div().id("tambah").h(30).px(12).flex().items_center().cursor_pointer().bg(this.editing ? "#a6e3a1" : "#89b4fa").text_color(t.chrome).rounded(5).text_size(11).font_bold()
+        .hover((s) => s.opacity(0.85)).tooltip(this.editing ? "Simpan perubahan task yang lagi diedit" : "Tambah task ke Antrean").on_click((_e, cx) => this.add(cx)).child(this.editing ? "SIMPAN ✓" : "+ TAMBAH"));
     const form = compact
       ? v_flex().gap(6).child(field(this.title)).child(field(this.detail))
         .child(h_flex().gap(6).child(spaceBtn).child(agentBtn))
@@ -340,7 +426,7 @@ export default class Kanban extends View {
         .child(h_flex().gap(8).items_center().child(field(this.title)).child(field(this.detail, 260)).child(addBtn))
         .child(h_flex().gap(6).items_center().flex_wrap().child(spaceBtn).child(agentBtn).child(modelBtn).child(effortBtn).child(priBtn).child(limitBtn).child(afterBtn));
     const column = (c, full) => {
-      const list = sortedIn(this.tasks, c.id), failed = list.filter((x) => x.failed).length;
+      const list = sortedIn(this.tasks, c.id), failed = list.filter((x) => x.failed && !x.stopped).length;
       return v_flex().flex_1().h_full().min_w(0).gap(8).p(8).bg(t.background).rounded(8)
         .child(h_flex().gap(6).items_center().child(div().size(7).bg(c.color)).child(div().text_size(11).font_bold().text_color(c.color).child(c.label)).child(div().text_size(10).text_color(t.dim).child(String(list.length)))
           .when(failed > 0, (el) => el.child(div().text_size(10).text_color("#f38ba8").child(`${failed} gagal`)))

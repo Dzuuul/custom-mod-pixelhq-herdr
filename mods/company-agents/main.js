@@ -2021,7 +2021,6 @@ export default class Agents extends View {
     const todayNow = this.today?.day === dayKey() ? this.today : freshDay();
     const officeLoad = everyone.reduce((n, a) => { const x = activityOf.get(a.address); return n + (x ? x.interns.length + x.jobs : 0); }, 0);
     const sceneOpts = {
-      music: Boolean(shared("pixel-hq.music")?.playing),
       now: new Date(),
       spaces: spaces().map((sp) => ({ id: sp.id, name: sp.name, status: sp.status, active: sp.active })),
       needYou: blockedAll.length,
@@ -2065,32 +2064,6 @@ export default class Agents extends View {
       })
       .child(scene(sz.width, sz.height, sceneOpts))
       .children(this.sceneSpots(sz, everyone, sceneOpts))
-      .when(Math.max(64, Math.min(110, Math.round(sz.width * 0.27 / 4) * 4)) >= 64, (el) => {
-        const m = shared("pixel-hq.music");
-        const isPlaying = Boolean(m?.playing);
-        const title = m?.title || "Pixel MusicBox";
-        const snap = (v) => Math.round(v / 4) * 4;
-        const yH = snap(snap(sz.height) * 0.3);
-        const base = yH - 8;
-        const rackW = Math.max(64, Math.min(110, snap(sz.width * 0.27)));
-        const rackX = sz.width - rackW - 10;
-        const rh = snap(Math.min(base - 8, 80));
-        const rt = base - rh;
-        return el.child(
-          div()
-            .id("ag-radio-target")
-            .absolute()
-            .left(rackX + 2)
-            .top(rt - 14)
-            .w(22)
-            .h(16)
-            .cursor_pointer()
-            .tooltip(isPlaying ? `📻 ${title} · Click to open controls` : "📻 Pixel MusicBox · Click to open")
-            .on_click((_e, cx) => {
-              cx.stop_propagation();
-            })
-        );
-      })
       .when(list.length === 0 && settledFloor === 0, (el) => el.child(div().absolute().left(12).top(sz.height * 0.5).w(sz.width - 24).px(8).py(6).bg("#0f111acc").border_1().border_color("#313244").text_size(12).text_color("#ffffff").child("Belum ada staf di lantai ini. Rekrut pakai tombol + di atas, atau jalanin agent di space ini.")))
       .when(list.length === 0 && settledFloor > 0, (el) => el.child(div().absolute().left(12).top(sz.height * 0.5).w(sz.width - 24).px(8).py(6).bg("#0f111acc").border_1().border_color("#313244").text_size(12).text_color("#a6e3a1").child("Semua yang kelar udah pulang. Klik chip ✓ di pojok buat manggil balik.")))
       .when(hidden > 0, (el) => el.child(div().absolute().right(8).top(horizon + 6).px(8).py(3).bg("#11111bdd").border_1().border_color("#45475a").text_size(11).text_color("#cdd6f4").child(`+${hidden} lagi · sempitkan panel buat lihat semua`)))

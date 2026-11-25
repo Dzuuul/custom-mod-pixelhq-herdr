@@ -14,7 +14,18 @@ const box = (frame, fill, shadow) => [
   ...notch(fill, [2, 4, 2, 4]),
 ];
 
+// Bagian keys.json yang dibaca lembar ini: global, plus "layout:pixel-hq" tempat install.sh/install.ps1 memasang
+// hotkey Kanban dan Usage (cuma aktif di layout ini).
+const SECTIONS = ["global", "layout:pixel-hq"];
+
 const HOTKEY_CATEGORIES = [
+  {
+    category: "Pixel HQ",
+    items: [
+      { action: "mod.open:company-kanban", name: "Papan kanban", desc: "Buka papan kanban: task buat agent" },
+      { action: "mod.open:company-usage", name: "Usage Claude", desc: "Buka riwayat usage Claude dan pemakaian per staf" },
+    ],
+  },
   {
     category: "Lantai (space)",
     items: [
@@ -111,16 +122,19 @@ export default class CompanyHotkeys extends View {
   getBindingsMap() {
     const map = new Map();
 
-    if (this.rawKeys?.global) {
-      for (const [chord, act] of Object.entries(this.rawKeys.global)) {
+    for (const sec of SECTIONS) {
+      const raw = this.rawKeys?.[sec];
+      if (!raw || typeof raw !== "object") continue;
+      for (const [chord, act] of Object.entries(raw)) {
+        if (typeof act !== "string") continue; // binding berbentuk objek ({command, args}) gak ditampilkan di sini
         if (!map.has(act)) map.set(act, []);
-        map.get(act).push(chord);
+        if (!map.get(act).includes(chord)) map.get(act).push(chord);
       }
     }
 
     const allKeys = keys() ?? [];
     for (const k of allKeys) {
-      if (k.section === "global") {
+      if (SECTIONS.includes(k.section)) {
         if (!map.has(k.action)) map.set(k.action, []);
         if (!map.get(k.action).includes(k.keys)) {
           map.get(k.action).push(k.keys);

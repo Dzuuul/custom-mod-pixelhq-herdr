@@ -144,6 +144,44 @@ if (Test-Path -LiteralPath $ClaudeDir -PathType Container) {
   Write-Host '~/.claude gak ada: lewati statusLine dan hook Claude Code.'
 }
 
+# 4. hotkey Kanban dan Usage, cuma aktif di layout pixel-hq (bagian "layout:pixel-hq" di keys.json).
+# Tombol yang udah kamu pakai buat hal lain gak ditimpa. Sama dengan langkah 2b di install.sh.
+$PixelKeys = [ordered]@{ 'ctrl-shift-j' = 'mod.open:company-kanban'; 'ctrl-shift-m' = 'mod.open:company-usage' }
+function Set-PixelHotkeys([string]$file) {
+  if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { Write-Host 'keys.json belum ada (jalanin Herdr sekali dulu): hotkey Kanban/Usage dilewati'; return }
+  $k = $null
+  try { $k = [System.IO.File]::ReadAllText($file, $utf8) | ConvertFrom-Json } catch { $k = $null }
+  if ($k -isnot [System.Management.Automation.PSCustomObject]) { Write-Host 'keys.json gak kebaca sebagai objek JSON: hotkey Kanban/Usage dilewati' -ForegroundColor Yellow; return }
+  $secProp = $k.PSObject.Properties['layout:pixel-hq']
+  $sec = if ($secProp -and $secProp.Value -is [System.Management.Automation.PSCustomObject]) { $secProp.Value } else { [pscustomobject]@{} }
+  $added = @()
+  foreach ($key in $PixelKeys.Keys) {
+    $act = $PixelKeys[$key]
+    $have = $sec.PSObject.Properties[$key]
+    if ($have -and $have.Value -is [string] -and $have.Value -eq $act) { continue }
+    $used = $null
+    foreach ($n in 'layout:pixel-hq', 'terminal', 'global') {
+      $p = $k.PSObject.Properties[$n]
+      if (-not $p -or $p.Value -isnot [System.Management.Automation.PSCustomObject]) { continue }
+      $b = $p.Value.PSObject.Properties[$key]
+      if ($b -and -not ($b.Value -is [string] -and $b.Value -eq $act)) { $used = $n; break }
+    }
+    if ($used) { Write-Host "Hotkey dilewati: $key (udah dipakai di $used)" -ForegroundColor Yellow; continue }
+    $sec | Add-Member -NotePropertyName $key -NotePropertyValue $act -Force
+    $added += "$key = $($act.Split(':')[1])"
+  }
+  if (-not $added.Count) { return }
+  if ($secProp) { $secProp.Value = $sec } else { $k | Add-Member -NotePropertyName 'layout:pixel-hq' -NotePropertyValue $sec }
+  $tmp = "$file.tmp.$PID"
+  [System.IO.File]::WriteAllText($tmp, (Format-Json $k) + "`n", $utf8)
+  try {
+    try { [System.IO.File]::Replace($tmp, $file, [NullString]::Value) }  # atomik di NTFS
+    catch { Move-Item -LiteralPath $tmp -Destination $file -Force }  # kalau ReplaceFile gak didukung (share jaringan)
+  } catch { Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue; throw }
+  Write-Host ('Hotkey dipasang: ' + ($added -join ', '))
+}
+Set-PixelHotkeys (Join-Path $Cfg 'keys.json')
+
 Write-Host ''
 Write-Host 'Selesai. Aktifkan layout-nya:'
 Write-Host '  herdr-app do layout.switch --name pixel-hq'

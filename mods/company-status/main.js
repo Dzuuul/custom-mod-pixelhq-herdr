@@ -1,100 +1,9 @@
 import { View, div, svg } from "gpui-kit";
 import { KanbanEngine } from "./kanban.js";
 import { h_flex } from "gpui-base";
-import { spaces, panes, focused, agents, theme, run, window, keys, setBadge, openOverlay, shared, setShared, appHome, home, exec, checking, settings, readTextFile, writeTextFile, notify } from "herdr";
+import { spaces, panes, focused, agents, theme, run, window, keys, setBadge, openOverlay, shared, home, checking, readTextFile, notify } from "herdr";
 
 const MONO = "JetBrains Mono, Menlo, monospace";
-
-async function ensureMusicHotkey(cx) {
-  try {
-    if (cx && typeof cx.bind_keys === "function") {
-      cx.bind_keys([{ keystroke: "ctrl-shift-m", action: "mod.open:company-music" }]);
-    }
-  } catch {}
-  try {
-    const home = appHome();
-    if (!home) return;
-    const path = `${home}/keys.json`;
-    const raw = await readTextFile(path).catch(() => null);
-    if (!raw) return;
-    const parsed = JSON.parse(raw);
-    let changed = false;
-    if (parsed.global && parsed.global["ctrl-shift-m"] !== "mod.open:company-music") {
-      parsed.global["ctrl-shift-m"] = "mod.open:company-music";
-      changed = true;
-    }
-    if (parsed.terminal && parsed.terminal["ctrl-shift-m"] !== "mod.open:company-music") {
-      parsed.terminal["ctrl-shift-m"] = "mod.open:company-music";
-      changed = true;
-    }
-    if (changed) {
-      await writeTextFile(path, JSON.stringify(parsed, null, 2), raw);
-    }
-  } catch {}
-}
-
-function hideMusicBox(cx) {
-  try { localStorage.setItem("pixel-hq.musicbox.hidden", "true"); } catch {}
-  setShared("pixel-hq.musicbox.hidden", true);
-  cx.notify();
-}
-
-function isMusicBoxDisabled() {
-  return true; // local: MusicBox removed
-  const sh = shared("pixel-hq.musicbox.hidden");
-  if (sh !== undefined && sh !== null) return Boolean(sh);
-  try {
-    if (localStorage.getItem("pixel-hq.musicbox.hidden") === "true") return true;
-  } catch {}
-  try {
-    const cfg = settings();
-    if (cfg?.musicbox === false || cfg?.music?.enabled === false || cfg?.["company-music"]?.enabled === false) return true;
-  } catch {}
-  return false;
-}
-
-let detectedPythonBin = null;
-
-async function getPythonBin() {
-  if (detectedPythonBin) return detectedPythonBin;
-  const script = `${appHome()}/mods/company-music/player.py`;
-  const isWin = window()?.platform === "windows" || appHome().includes(":") || appHome().includes("\\");
-  const candidates = isWin ? ["python", "py", "python3"] : ["python3", "python"];
-  for (const bin of candidates) {
-    const r = await exec(bin, [script, "check"], { timeout: 4000 }).catch(() => null);
-    if (r?.stdout && r.stdout.includes('"status"')) {
-      detectedPythonBin = bin;
-      return bin;
-    }
-  }
-  detectedPythonBin = candidates[0];
-  return detectedPythonBin;
-}
-
-async function runPlayer(args, timeout = 15000) {
-  const bin = await getPythonBin();
-  const script = `${appHome()}/mods/company-music/player.py`;
-  const r = await exec(bin, [script, ...args], { timeout }).catch(() => null);
-  if (!r?.stdout) return null;
-  try {
-    return JSON.parse(r.stdout.trim().split("\n").pop());
-  } catch {
-    return null;
-  }
-}
-
-function formatTime(seconds) {
-  if (!seconds || isNaN(seconds) || seconds < 0) return "00:00";
-  const s = Math.floor(seconds);
-  const m = Math.floor(s / 60);
-  const rem = s % 60;
-  if (m >= 60) {
-    const h = Math.floor(m / 60);
-    const remM = m % 60;
-    return `${h}:${remM.toString().padStart(2, "0")}:${rem.toString().padStart(2, "0")}`;
-  }
-  return `${m.toString().padStart(2, "0")}:${rem.toString().padStart(2, "0")}`;
-}
 
 const notch = (c, [l, r, t, b]) => [
   div().absolute().left(l + 2).right(r + 2).top(t).bottom(b).bg(c),
@@ -121,15 +30,23 @@ function fmtLeft(sec) {
 }
 // Peringatan sekali per jendela usage (sesi 5 jam / minggu) untuk tiap ambang; yang sudah muncul diingat
 // di localStorage, jadi gak muncul lagi setelah restart sampai jendelanya reset.
+// Ambangnya diatur dari dialog Usage Claude (tombol PERINGATAN), disimpan di shared("pixel-hq.usage-thresholds"):
+// daftar persen, [] = mati. Belum pernah diatur = 80 dan 95.
 const USAGE_ALERTS = [80, 95];
+function usageThresholds() {
+  const v = shared("pixel-hq.usage-thresholds");
+  return Array.isArray(v) ? v.filter((n) => typeof n === "number" && n > 0 && n <= 100).sort((a, b) => a - b) : USAGE_ALERTS;
+}
 function usageAlerts(u) {
   if (!u || Date.now() / 1000 - (u.at ?? 0) > 3600) return;
+  const ths = usageThresholds();
+  if (!ths.length) return;
   let fired = {};
   try { fired = JSON.parse(localStorage.getItem("pixel-hq.usage-alerts") ?? "{}") ?? {}; } catch {}
   let dirty = false;
   for (const [id, label, w] of [["session", "sesi 5 jam", u.session], ["week", "minggu ini", u.week]]) {
     if (typeof w?.used !== "number") continue;
-    const hit = USAGE_ALERTS.filter((th) => w.used >= th).pop();
+    const hit = ths.filter((th) => w.used >= th).pop();
     if (hit === undefined) continue;
     const key = `${id}:${w.resets ?? "?"}:${hit}`;
     if (fired[key]) continue;
@@ -137,7 +54,7 @@ function usageAlerts(u) {
     const left = fmtLeft(w.resets);
     try {
       notify({ title: `Usage Claude ${label} udah ${Math.round(w.used)}%`, body: left ? `Reset ${left}. Klik buat lihat detail.` : "Klik buat lihat detail.",
-        level: hit >= 95 ? "error" : "warning", timeout: 20000, action: { name: "mod.open", args: { name: "company-usage" } } });
+        level: hit >= 90 ? "error" : "warning", timeout: 20000, action: { name: "mod.open", args: { name: "company-usage" } } });
     } catch {}
   }
   if (dirty) {
@@ -159,7 +76,6 @@ function usageCell(label, w, t) {
 export default class WorkspaceStatus extends View {
   init(_props, cx) {
     if (checking()) return;
-    this.polling = false;
     this.usage = null;
     this.kb = new KanbanEngine();
     cx.timer.every(3000, (cx) => this.kb.tick().then(() => cx.notify()).catch(() => {}));
@@ -173,67 +89,6 @@ export default class WorkspaceStatus extends View {
     });
     loadUsage(cx);
     cx.timer.every(20000, (cx) => loadUsage(cx));
-    cx.spawn(async (cx) => {
-    });
-    let prevDisabled = isMusicBoxDisabled();
-    cx.timer.every(500, (cx) => {
-      const curDisabled = isMusicBoxDisabled();
-      if (curDisabled !== prevDisabled) {
-        prevDisabled = curDisabled;
-        cx.notify();
-        return;
-      }
-      if (curDisabled) return;
-      const music = shared("pixel-hq.music");
-      if (music?.playing) cx.notify();
-    });
-    cx.timer.every(3000, async (cx) => {
-      if (this.polling || isMusicBoxDisabled()) return;
-      const music = shared("pixel-hq.music");
-      this.polling = true;
-      try {
-        const res = await runPlayer(["status"], 15000);
-        if (res) {
-          if (
-            res.playing !== music?.playing ||
-            res.status !== music?.status ||
-            (res.title && res.title !== music?.title) ||
-            (res.url && res.url !== music?.url) ||
-            res.startTime !== music?.startTime ||
-            res.pid !== music?.pid
-          ) {
-            setShared("pixel-hq.music", res);
-            cx.notify();
-          }
-        }
-      } finally {
-        this.polling = false;
-      }
-    });
-  }
-
-  async musicAction(action, cx) {
-    if (this.actionBusy) return;
-    this.actionBusy = true;
-    if (action === "next" || action === "prev") {
-      const cur = shared("pixel-hq.music");
-      setShared("pixel-hq.music", {
-        ...(cur || {}),
-        playing: false,
-        status: "buffering",
-        title: "Switching station..."
-      });
-      if (cx) cx.notify();
-    }
-    try {
-      const res = await runPlayer([action], 35000);
-      if (res) {
-        setShared("pixel-hq.music", res);
-        if (cx) cx.notify();
-      }
-    } finally {
-      this.actionBusy = false;
-    }
   }
 
   switcherHint() {
@@ -246,13 +101,23 @@ export default class WorkspaceStatus extends View {
     return `${key} Pindah lantai`;
   }
 
+  // Tombol yang membuka `action` (global, atau "layout:pixel-hq" yang dipasang installer), ditulis buat orang. "" kalau gak ada.
+  keyOf(action) {
+    const mac = window()?.platform === "macos";
+    const mod = { cmd: mac ? "⌘" : "Ctrl+", ctrl: mac ? "⌃" : "Ctrl+", shift: mac ? "⇧" : "Shift+", alt: mac ? "⌥" : "Alt+", option: mac ? "⌥" : "Alt+" };
+    const b = keys().find((k) => (k.section === "global" || k.section === "layout:pixel-hq") && k.action === action);
+    if (!b) return "";
+    const parts = b.keys.endsWith("--") ? [...b.keys.slice(0, -2).split("-"), "-"] : b.keys.split("-");
+    return parts.map((p) => mod[p.toLowerCase()] ?? p.toUpperCase()).join("");
+  }
+
   hint(t) {
     const mac = window()?.platform === "macos";
     const mod = { cmd: mac ? "⌘" : "Ctrl+", ctrl: mac ? "⌃" : "Ctrl+", shift: mac ? "⇧" : "Shift+", alt: mac ? "⌥" : "Alt+", option: mac ? "⌥" : "Alt+" };
     const b = keys().find((k) => k.section === "global" && k.action === "app.palette");
     const parts = b && b.keys.endsWith("--") ? [...b.keys.slice(0, -2).split("-"), "-"] : b?.keys.split("-");
     const key = parts && parts.map((p) => mod[p.toLowerCase()] ?? p.toUpperCase()).join("");
-    return key ? `${key}  commands` : "commands";
+    return key ? `${key} PERINTAH` : "PERINTAH";
   }
 
   render() {
@@ -311,166 +176,13 @@ export default class WorkspaceStatus extends View {
         const tip = `Pemakaian Claude Code${stale ? " (data udah lama, jalanin Claude dulu biar ke-update)" : ""}\n`
           + `Sesi 5 jam: ${typeof u.session?.used === "number" ? Math.round(u.session.used) + "% terpakai" : "-"}${fmtLeft(u.session?.resets) ? ", reset " + fmtLeft(u.session.resets) : ""}\n`
           + `Minggu ini: ${typeof u.week?.used === "number" ? Math.round(u.week.used) + "% terpakai" : "-"}${fmtLeft(u.week?.resets) ? ", reset " + fmtLeft(u.week.resets) : ""}`;
-        return el.child(h_flex().id("claude-usage").gap(10).items_center().px(6).tooltip(tip + "\nKlik buat riwayat dan pemakaian per staf").opacity(stale ? 0.55 : 1)
+        const key = this.keyOf("mod.open:company-usage");
+        return el.child(h_flex().id("claude-usage").gap(10).items_center().px(6).tooltip(`${tip}\nKlik${key ? ` (atau ${key})` : ""} buat riwayat dan pemakaian per staf`).opacity(stale ? 0.55 : 1)
           .cursor_pointer().hover((s) => s.bg(t.hover)).on_click(() => run("mod.open", { name: "company-usage" }))
           .child(div().text_color(t.dim).child("CLAUDE"))
           .child(usageCell("SESI", u.session, t) ?? div())
           .child(usageCell("MINGGU", u.week, t) ?? div()));
       })
-      .when(!isMusicBoxDisabled(), (el) =>
-        el.child(
-          (() => {
-            const m = shared("pixel-hq.music");
-            const setup = shared("pixel-hq.music-setup");
-            if (setup?.installing) {
-              return h_flex()
-                .id("btn-music")
-                .gap(5)
-                .items_center()
-                .px(6)
-                .py(2)
-                
-                .max_w(170)
-                .cursor_pointer()
-                .bg("#313244")
-                .text_color("#f9e2af")
-                .tooltip(setup.msg || "Lagi masang mesin audio... · Klik buat lihat")
-                .on_click(() => run("mod.open", { name: "company-music" }))
-                .on_mouse_down("right", (_e, cx) => {
-                  cx.stop_propagation();
-                  hideMusicBox(cx);
-                })
-                .child(div().text_size(10).child("⏳"))
-                .child(div().truncate().text_size(11).font_semibold().child("Lagi masang..."));
-            }
-            const isPlaying = Boolean(m?.playing);
-            const isPaused = m?.status === "paused";
-            const isBuffering = m?.status === "buffering";
-            const title = m?.title || "MusicBox";
-
-            const nowSec = Math.floor(Date.now() / 1000);
-            const pauseElapsed = Number(m?.elapsed || 0);
-            const liveElapsed = isPlaying && m?.startTime
-              ? pauseElapsed + Math.max(0, nowSec - m.startTime)
-              : Number(m?.currentElapsed || pauseElapsed);
-            const dur = Number(m?.duration || 0);
-            const timeText = dur > 0 ? `${formatTime(liveElapsed)}/${formatTime(dur)}` : formatTime(liveElapsed);
-            if (isPlaying || isPaused || isBuffering) {
-              const playPauseIcon = isPlaying ? "⏸" : "▶";
-              const playPauseTooltip = isPlaying ? "Jeda" : "Lanjut";
-              return h_flex()
-                .id("btn-music-bar")
-                .gap(3)
-                .items_center()
-                .px(5)
-                .py(2)
-                
-                .bg("#181825")
-                .border_1()
-                .border_color("#313244")
-                .on_mouse_down("right", (_e, cx) => {
-                  cx.stop_propagation();
-                  hideMusicBox(cx);
-                })
-                .child(
-                  div()
-                    .cursor_pointer()
-                    .w(22)
-                    .h(20)
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    
-                    .text_size(13.5)
-                    .text_color(t.dim)
-                    .hover((s) => s.bg(t.hover).text_color(t.foreground))
-                    .tooltip("Lagu / stasiun sebelumnya")
-                    .on_click((_e, cx) => this.musicAction("prev", cx))
-                    .child("⏮")
-                )
-                .child(
-                  div()
-                    .cursor_pointer()
-                    .w(22)
-                    .h(20)
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    
-                    .text_size(14)
-                    .text_color(isPlaying ? "#a6e3a1" : "#89b4fa")
-                    .hover((s) => s.bg(t.hover))
-                    .tooltip(playPauseTooltip)
-                    .on_click((_e, cx) => this.musicAction(isPlaying ? "pause" : "resume", cx))
-                    .child(isBuffering ? "⏳" : playPauseIcon)
-                )
-                .child(
-                  div()
-                    .cursor_pointer()
-                    .w(22)
-                    .h(20)
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    
-                    .text_size(13.5)
-                    .text_color("#f38ba8")
-                    .hover((s) => s.bg(t.hover))
-                    .tooltip("Setop muter")
-                    .on_click((_e, cx) => this.musicAction("stop", cx))
-                    .child("⏹")
-                )
-                .child(
-                  div()
-                    .cursor_pointer()
-                    .w(22)
-                    .h(20)
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    
-                    .text_size(13.5)
-                    .text_color(t.dim)
-                    .hover((s) => s.bg(t.hover).text_color(t.foreground))
-                    .tooltip("Lagu / stasiun berikutnya")
-                    .on_click((_e, cx) => this.musicAction("next", cx))
-                    .child("⏭")
-                )
-                .child(
-                  h_flex()
-                    .cursor_pointer()
-                    .items_center()
-                    .gap(5)
-                    .px(6)
-                    .py(2)
-                    
-                    .max_w(250)
-                    .hover((s) => s.bg(t.hover))
-                    .tooltip(`Pixel MusicBox: ${title} (${timeText}) · Buka kontrol · Klik kanan buat sembunyiin dari status bar`)
-                    .on_click(() => run("mod.open", { name: "company-music" }))
-                    .child(svg("mods/company-status/boombox.svg").size(14).flex_none())
-                    .child(div().truncate().text_size(11.5).font_semibold().text_color(t.foreground).child(title))
-                    .child(
-                      div()
-                        .text_size(10)
-                        .font_family(MONO)
-                        .text_color(isPlaying ? "#89b4fa" : t.dim)
-                        .child(timeText)
-                    )
-                );
-            }
-            return chip(h_flex(), t)
-              .id("btn-music")
-              .tooltip("Buka Pixel MusicBox · Klik kanan buat sembunyiin dari status bar")
-              .on_click(() => run("mod.open", { name: "company-music" }))
-              .on_mouse_down("right", (_e, cx) => {
-                cx.stop_propagation();
-                hideMusicBox(cx);
-              })
-              .child("MUSICBOX");
-          })()
-        )
-      )
       .child(
         chip(h_flex(), t)
           .id("btn-switcher")
@@ -481,7 +193,7 @@ export default class WorkspaceStatus extends View {
       .child(
         chip(h_flex(), t)
           .id("btn-kanban")
-          .tooltip("Buka papan kanban: task yang dipindah ke 'sedang dikerjakan' dikerjain agent otomatis")
+          .tooltip(`Buka papan kanban${this.keyOf("mod.open:company-kanban") ? ` (${this.keyOf("mod.open:company-kanban")})` : ""}: task yang dipindah ke 'sedang dikerjakan' dikerjain agent otomatis`)
           .on_click(() => run("mod.open", { name: "company-kanban" }))
           .child(`KANBAN${this.kb?.counts?.doing ? ` · ${this.kb.counts.doing} JALAN` : this.kb?.counts?.todo ? ` · ${this.kb.counts.todo}` : ""}${this.kb?.counts?.failed ? ` · ${this.kb.counts.failed} GAGAL` : ""}`)
       )
@@ -495,7 +207,8 @@ export default class WorkspaceStatus extends View {
       .child(
         chip(h_flex().id("palette"), t)
           .on_click(() => run("app.palette"))
-          .child(this.hint(t).replace("  commands", " COMMANDS").replace(/^commands$/, "COMMANDS"))
+          .tooltip("Buka palet perintah")
+          .child(this.hint(t).toUpperCase())
       );
   }
 }

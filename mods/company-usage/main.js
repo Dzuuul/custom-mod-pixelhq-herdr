@@ -3,7 +3,7 @@
 // Data: ~/.local/state/pixel-hq/claude-usage.json dan claude-usage-history.json ([waktu, sesi %, minggu %]).
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { agents, terminals, shared, theme, home, readTextFile, closeOverlay, props } from "herdr";
+import { agents, terminals, shared, setShared, theme, home, readTextFile, closeOverlay, props } from "herdr";
 
 const MONO = "JetBrains Mono, Menlo, monospace";
 const dir = () => `${home()}/.local/state/pixel-hq`;
@@ -26,6 +26,17 @@ function fmtLeft(sec) {
 }
 const fmtTok = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${Math.round(n / 1e3)}k` : String(n));
 const DAYS = ["Min", "Sen", "Sel", "Rab", "Kam", "Jum", "Sab"];
+// Ambang notifikasi usage, dibaca company-status (usageAlerts). Klik tombol PERINGATAN buat ganti ke pilihan berikutnya.
+const THRESHOLDS_KEY = "pixel-hq.usage-thresholds";
+const PRESETS = [[80, 95], [70, 90], [50, 80, 95], [90], []];
+const thresholds = () => {
+  const v = shared(THRESHOLDS_KEY);
+  return Array.isArray(v) ? v.filter((n) => typeof n === "number" && n > 0 && n <= 100).sort((a, b) => a - b) : PRESETS[0];
+};
+const thresholdText = (ths) => (ths.length ? ths.map((n) => `${n}%`).join(" · ") : "mati");
+const thresholdSentence = (ths) => ths.length
+  ? `Notifikasi muncul saat sesi atau minggu ini lewat ${ths.length > 1 ? `${ths.slice(0, -1).map((n) => `${n}%`).join(", ")} dan ${ths[ths.length - 1]}%` : `${ths[0]}%`}.`
+  : "Notifikasi usage dimatikan.";
 
 // Nilai tertinggi per ember waktu; ember tanpa sampel = null (gak digambar).
 function buckets(rows, idx, from, size, n) {
@@ -56,6 +67,11 @@ export default class Usage extends View {
   }
 
   close() { const ov = props()?.overlay; if (ov) closeOverlay(ov); }
+
+  nextThresholds() {
+    const cur = JSON.stringify(thresholds()), i = PRESETS.findIndex((p) => JSON.stringify(p) === cur);
+    setShared(THRESHOLDS_KEY, PRESETS[(i + 1) % PRESETS.length]);
+  }
 
   section(title, sub) {
     const t = theme();
@@ -95,7 +111,7 @@ export default class Usage extends View {
   }
 
   render() {
-    const t = theme(), u = this.usage, H = 3600000, now = Date.now();
+    const t = theme(), u = this.usage, H = 3600000, now = Date.now(), ths = thresholds();
     const stale = u && now / 1000 - (u.at ?? 0) > 3600;
     // sesi: 48 ember 30 menit; minggu: 14 hari (mulai tengah malam)
     const fromS = now - 24 * H, sLabels = Array.from({ length: 48 }, (_, i) => { const d = new Date(fromS + i * H / 2); return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`; });
@@ -121,6 +137,10 @@ export default class Usage extends View {
       .child(h_flex().items_center().gap(10)
         .child(div().flex_1().text_size(13).font_bold().text_color("#b4befe").child("USAGE CLAUDE CODE"))
         .when(Boolean(stale), (el) => el.child(div().text_size(10).text_color("#f9b84a").child("data udah lebih dari 1 jam")))
+        .child(div().id("peringatan").px(7).h(20).flex().items_center().cursor_pointer().bg(t.raised).text_size(10).font_bold()
+          .text_color(ths.length ? "#f9b84a" : t.dim).hover((s) => s.bg(t.hover))
+          .tooltip("Kapan notifikasi usage muncul. Klik buat ganti: 80·95 → 70·90 → 50·80·95 → 90 → mati")
+          .on_click(() => this.nextThresholds()).child(`PERINGATAN: ${thresholdText(ths)} ▾`))
         .child(div().id("tutup").px(7).h(20).flex().items_center().cursor_pointer().bg(t.raised).text_color(t.muted).text_size(10).font_bold()
           .hover((s) => s.bg(t.hover)).on_click(() => this.close()).child("TUTUP (ESC)")))
       .child(v_flex().id("isi").flex_1().min_h(0).gap(12).overflow_y_scrollbar()
@@ -129,6 +149,6 @@ export default class Usage extends View {
         .child(this.section("MINGGUAN", "14 hari terakhir, tertinggi tiap hari")).child(this.bars("grafik-minggu", wVals, wLabels))
         .child(this.section("PER STAF", "sesi yang lagi terbuka · biaya = perkiraan Claude Code, bukan tagihan"))
         .child(table)
-        .child(div().text_size(10).text_color(t.dim).child("Notifikasi muncul saat sesi atau minggu ini lewat 80% dan 95%. Riwayat disimpan 14 hari di ~/.local/state/pixel-hq/.")));
+        .child(div().text_size(10).text_color(t.dim).child(`${thresholdSentence(ths)} Riwayat disimpan 14 hari di ~/.local/state/pixel-hq/.`)));
   }
 }

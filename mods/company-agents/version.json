@@ -1,1 +1,1 @@
-{"version":"2.1.0","type":"normal","notes":"Versi custom: bahasa Indonesia penuh, kanban lebih lengkap, peringatan dan riwayat usage Claude, updater dari repo sendiri, nama staf acak yang unik.","base":"pixel-hq 1.8.4"}
+{"version":"2.2.0","type":"normal","notes":"Kanban: task gak terkirim dobel lagi, tombol EDIT dan STOP, model/effort ikut ke agent baru. Hotkey Ctrl+Shift+J (Kanban) dan Ctrl+Shift+M (Usage), ambang notifikasi usage bisa diatur, sisa MusicBox dibersihkan. Windows: hasil kerja, riwayat usage, token/biaya, dan uninstall.cmd.","base":"pixel-hq 1.8.4"}

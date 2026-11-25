@@ -1,6 +1,6 @@
 #!/bin/sh
 # Copot custom Pixel HQ dari Herdr dan Claude Code di komputer ini.
-#   sh uninstall.sh            copot mod, layout, tema, hook, dan statusLine Pixel HQ (data kanban & usage disimpan)
+#   sh uninstall.sh            copot mod, layout, tema, hook, statusLine, dan hotkey Pixel HQ (data kanban & usage disimpan)
 #   sh uninstall.sh --purge    sekalian hapus data kanban dan riwayat usage
 #   sh uninstall.sh --restore  bukan copot: kembalikan kondisi dari backup terbaru yang dibuat install.sh
 #   sh uninstall.sh --restore FILE   sama, tapi dari backup tertentu (lihat daftar: ls ~/backups/herdr/)
@@ -78,6 +78,32 @@ leave_layout
 for d in "$CFG"/mods/company-*; do [ -d "$d" ] && rm -rf "$d"; done
 rm -f "$CFG/layouts/pixel-hq.json" "$CFG/themes/pixel-hq.json"
 echo "Mod company-*, layout, dan tema pixel-hq dihapus"
+# hotkey Kanban/Usage yang dipasang install.sh, cuma yang masih menunjuk ke mod Pixel HQ
+if [ -f "$CFG/keys.json" ]; then
+  python3 - "$CFG/keys.json" <<'PY'
+import json, os, sys
+KEYS = {"ctrl-shift-j": "mod.open:company-kanban", "ctrl-shift-m": "mod.open:company-usage"}
+p = sys.argv[1]
+try:
+    with open(p, encoding="utf-8") as fh:
+        d = json.load(fh)
+except Exception:
+    sys.exit(0)
+sec = d.get("layout:pixel-hq") if isinstance(d, dict) else None
+if isinstance(sec, dict) and any(sec.get(k) == a for k, a in KEYS.items()):
+    for k, a in KEYS.items():
+        if sec.get(k) == a:
+            del sec[k]
+    if not sec:
+        del d["layout:pixel-hq"]
+    tmp = "%s.tmp.%d" % (p, os.getpid())
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump(d, fh, indent=2, ensure_ascii=False)
+        fh.write("\n")
+    os.replace(tmp, p)
+    print("Hotkey Kanban/Usage dicabut dari keys.json")
+PY
+fi
 
 # 3. data
 if [ "$MODE" = "purge" ]; then

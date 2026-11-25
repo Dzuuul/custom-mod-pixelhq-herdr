@@ -6,7 +6,11 @@
 #   agent.threads       sub-agents running
 #
 # Usage (from Claude Code hooks, JSON on stdin):
-#   claude-activity.ps1 job-start | job-end | sub-start | sub-end | turn-end | reset
+#   claude-activity.ps1 job-start | job-end | sub-start | sub-end | turn-end | stop | reset
+# "stop" is turn-end plus: the agent's last reply goes to ~/.local/state/pixel-hq/last/<terminal>.json
+# ({"at": epoch seconds, "text": ...}), which the Pixel HQ kanban shows on the finished task's card.
+# A Stop hook installed by an older version still says "turn-end": it is recognised by the payload's
+# hook_event_name, so the reply is saved without installing the hooks again.
 # Does nothing outside a Herdr terminal (no HC_TERMINAL_ID) and never fails the hook.
 # Starting PowerShell takes a few hundred ms, so the hooks that run around every command, sub-agent and turn are
 # installed with "async": Claude Code does not wait for them. Their events may then arrive out of order, so an id
@@ -34,7 +38,7 @@ $HookSpecs = @(  # (event, matcher, action, async); Claude Code on Windows runs 
   @('SubagentStart', $null, 'sub-start', $true),
   @('SubagentStop', $null, 'sub-end', $true),
   @('UserPromptSubmit', $null, 'turn-end', $true),
-  @('Stop', $null, 'turn-end', $true),
+  @('Stop', $null, 'stop', $true),
   @('SessionStart', '^(startup|resume|clear)$', 'reset', $false),
   @('SessionEnd', $null, 'reset', $false)
 )
@@ -181,6 +185,57 @@ function Setup([bool]$remove) {
   Write-Host ($(if ($remove) { 'Removed' } else { 'Installed' }) + " Pixel HQ hooks in $path (backup: $path.pixel-hq.bak)")
 }
 
+function Last-Reply($payload) {
+  # The agent's last reply: from the hook payload when Claude Code sends it, else from the transcript's tail.
+  $text = P $payload 'last_assistant_message'
+  if ($text -is [string] -and $text.Trim()) { return $text.Trim() }
+  $path = [string](P $payload 'transcript_path')
+  if (-not $path) { return '' }
+  try { if (-not [System.IO.File]::Exists($path)) { return '' } } catch { return '' }
+  $tail = [System.Collections.Generic.List[string]]::new()
+  $fs = $null
+  $r = $null
+  try {
+    $fs = [System.IO.File]::Open($path, 'Open', 'Read', 'ReadWrite, Delete')
+    if ($fs.Length -gt 2000000) { [void]$fs.Seek($fs.Length - 2000000, 'Begin') }  # only the tail: transcripts grow large
+    $r = [System.IO.StreamReader]::new($fs, $utf8)
+    while ($null -ne ($line = $r.ReadLine())) {
+      if ($line -match '"role"\s*:\s*"assistant"') {
+        $tail.Add($line)
+        if ($tail.Count -gt 50) { $tail.RemoveAt(0) }
+      }
+    }
+  } catch { return '' } finally { if ($r) { $r.Dispose() } elseif ($fs) { $fs.Dispose() } }
+  for ($i = $tail.Count - 1; $i -ge 0; $i--) {
+    $ev = $null
+    try { $ev = Parse-Json $tail[$i] } catch { continue }
+    $msg = P $ev 'message'
+    if ([string](P $msg 'role') -ne 'assistant') { continue }
+    $content = P $msg 'content'
+    $parts = [System.Collections.Generic.List[string]]::new()
+    if ($content -is [string]) { $parts.Add($content) }
+    elseif ($content -is [System.Collections.IEnumerable]) {
+      foreach ($c in $content) { if ([string](P $c 'type') -eq 'text' -and [string](P $c 'text')) { $parts.Add([string](P $c 'text')) } }
+    }
+    $joined = ($parts -join "`n").Trim()
+    if ($joined) { return $joined }
+  }
+  return ''
+}
+function Save-Reply([string]$term, $payload) {
+  $text = Last-Reply $payload
+  if (-not $text) { return }
+  if ($text.Length -gt 4000) {
+    $start = $text.Length - 4000
+    if ([char]::IsLowSurrogate($text[$start])) { $start++ }  # don't cut a character in half
+    $text = $text.Substring($start)
+  }
+  $folder = [System.IO.Path]::Combine($env:USERPROFILE, '.local', 'state', 'pixel-hq', 'last')
+  [void][System.IO.Directory]::CreateDirectory($folder)
+  $at = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+  Write-TextAtomic ([System.IO.Path]::Combine($folder, "$term.json")) ('{"at": ' + $at + ', "text": ' + (Format-JsonString $text) + '}')
+}
+
 function Read-Times($o) {
   # {id: ms since epoch} from the state file
   $t = [System.Collections.Generic.Dictionary[string, long]]::new()
@@ -209,6 +264,11 @@ function Report {
     $raw = [System.IO.StreamReader]::new([Console]::OpenStandardInput(), $utf8).ReadToEnd()
     if ($raw.Trim()) { $payload = Parse-Json $raw }
   } catch {}
+  $act = $Action
+  if ($act -eq 'stop' -or ($act -eq 'turn-end' -and [string](P $payload 'hook_event_name') -eq 'Stop')) {
+    try { Save-Reply $term $payload } catch {}
+    $act = 'turn-end'
+  }
   $hc = Find-Hc
   if (-not $hc) { return }
 
@@ -237,7 +297,7 @@ function Report {
 
     $toolId = [string](P $payload 'tool_use_id')
     $agentId = [string](P $payload 'agent_id')
-    switch ($Action) {
+    switch ($act) {
       'job-start' { if ($toolId -and -not $ended.ContainsKey($toolId)) { $jobs[$toolId] = $now } }
       'job-end' { if ($toolId) { [void]$jobs.Remove($toolId); $ended[$toolId] = $now } }
       'sub-start' {

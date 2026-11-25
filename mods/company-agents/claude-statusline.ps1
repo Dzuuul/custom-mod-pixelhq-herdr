@@ -4,7 +4,9 @@
 # it tells Herdr how full the context is (labels agent.context / claude.context, 0-100),
 # how much of the quota window is left (agent.quota / claude.quota, 0-100) and effort level (agent.effort / claude.effort)
 # so the desk can show HP/SP bars, writes the Claude usage file the status bar reads
-# (~/.local/state/pixel-hq/claude-usage.json) and prints a short status.
+# (~/.local/state/pixel-hq/claude-usage.json) plus its history for the usage dialog's charts
+# (claude-usage-history.json), labels the session's tokens and cost (agent.tokens / agent.cost)
+# for the usage dialog's per-staff table, and prints a short status. Same output as claude-statusline.sh.
 # Also clears the labels when the agent stops reporting them, so a stale number never outlives its source.
 # Outside a Herdr terminal it only prints the status.
 # Run as: powershell -NoProfile -ExecutionPolicy Bypass -File "<path>/pixel-hq-statusline.ps1"
@@ -55,6 +57,17 @@ function J($v) {
   return '"' + $s + '"'
 }
 function Pct($v) { return [string][int][math]::Max(0, [math]::Min(100, [math]::Round([double]$v))) }
+function Write-Atomic([string]$dst, [string]$text) {
+  $tmp = "$dst.tmp.$PID"
+  [System.IO.File]::WriteAllText($tmp, $text, $utf8)
+  try {
+    if (-not [System.IO.File]::Exists($dst)) { [System.IO.File]::Move($tmp, $dst) }
+    else {
+      try { [System.IO.File]::Replace($tmp, $dst, [NullString]::Value) }  # atomic on NTFS
+      catch { [System.IO.File]::Delete($dst); [System.IO.File]::Move($tmp, $dst) }  # where ReplaceFile is not supported
+    }
+  } catch { try { [System.IO.File]::Delete($tmp) } catch {} }
+}
 function Each-Line([string]$path, [scriptblock]$fn) {
   # reads a file the agent may still be writing
   $r = [System.IO.StreamReader]::new([System.IO.File]::Open($path, 'Open', 'Read', 'ReadWrite, Delete'), $utf8)
@@ -90,6 +103,8 @@ $model = ''
 $pct = ''
 $quota = ''
 $effort = ''
+$cost = ''
+$tokens = ''
 try {
   $m = P $d 'model'
   if (IsObj $m) { $model = Clean (First (P $m 'display_name') (P $m 'name') (P $m 'id') (P $m 'title')) }
@@ -177,16 +192,46 @@ try {
       [void][System.IO.Directory]::CreateDirectory($ud)
       $at = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
       $o = '{"at": ' + $at + ', "session": {"used": ' + (J $fiveUsed) + ', "resets": ' + (J (P $five 'resets_at')) + '}, "week": {"used": ' + (J $sevUsed) + ', "resets": ' + (J (P $sev 'resets_at')) + '}}'
-      $dst = [System.IO.Path]::Combine($ud, 'claude-usage.json')
-      $tmp = "$dst.tmp.$PID"
-      [System.IO.File]::WriteAllText($tmp, $o, $utf8)
-      try {
-        if (-not [System.IO.File]::Exists($dst)) { [System.IO.File]::Move($tmp, $dst) }
-        else {
-          try { [System.IO.File]::Replace($tmp, $dst, [NullString]::Value) }  # atomic on NTFS
-          catch { [System.IO.File]::Delete($dst); [System.IO.File]::Move($tmp, $dst) }  # where ReplaceFile is not supported
+      Write-Atomic ([System.IO.Path]::Combine($ud, 'claude-usage.json')) $o
+
+      # History for the usage dialog's charts: [time, session %, week %], at most every 5 minutes
+      # (or when the numbers change), kept 14 days. Same rules as claude-statusline.sh.
+      $hp = [System.IO.Path]::Combine($ud, 'claude-usage-history.json')
+      $rows = [System.Collections.ArrayList]::new()
+      if ([System.IO.File]::Exists($hp)) {
+        $h = $null
+        try { $h = Parse-Json ([System.IO.File]::ReadAllText($hp, $utf8)) } catch {}
+        if ($h -is [System.Collections.IList]) {
+          foreach ($r in $h) {
+            if ($r -isnot [System.Collections.IList] -or $r.Count -ne 3 -or -not (IsNum $r[0])) { continue }
+            if ($at - [long]$r[0] -ge 14 * 86400) { continue }
+            [void]$rows.Add(@($r[0], $r[1], $r[2]))
+          }
         }
-      } catch { try { [System.IO.File]::Delete($tmp) } catch {} }
+      }
+      $prev = $null  # (an if-expression would unroll the row into the pipeline)
+      if ($rows.Count) { $prev = $rows[$rows.Count - 1] }
+      if ($null -eq $prev -or ($at - [long]$prev[0]) -ge 300 -or (J $prev[1]) -ne (J $fiveUsed) -or (J $prev[2]) -ne (J $sevUsed)) {
+        $row = @($at, $fiveUsed, $sevUsed)
+        if ($null -ne $prev -and ($at - [long]$prev[0]) -lt 60) { $rows[$rows.Count - 1] = $row } else { [void]$rows.Add($row) }
+        $parts = [System.Collections.Generic.List[string]]::new()
+        foreach ($r in $rows) { $parts.Add('[' + (J $r[0]) + ',' + (J $r[1]) + ',' + (J $r[2]) + ']') }
+        Write-Atomic $hp ('[' + ($parts -join ',') + ']')
+      }
+    }
+  } catch {}
+
+  # Tokens and cost of this session, for the per-staff table in the usage dialog
+  try {
+    $tc = P (P $d 'cost') 'total_cost_usd'
+    if (IsNum $tc) { $cost = ([double]$tc).ToString('0.0000', $inv) }
+    $ti = P $c 'total_input_tokens'
+    $to = P $c 'total_output_tokens'
+    if ((IsNum $ti) -or (IsNum $to)) {
+      $sum = 0.0
+      if (IsNum $ti) { $sum += [double]$ti }
+      if (IsNum $to) { $sum += [double]$to }
+      $tokens = [string][long][math]::Floor($sum)
     }
   } catch {}
 } catch {}
@@ -201,6 +246,8 @@ if ($term) {
         $v = switch ($k) { 'context' { $pct } 'model' { $model } 'quota' { $quota } 'effort' { $effort } }
         foreach ($ns in 'agent', 'claude', 'agy') { $argv += "$ns.$k=$v" }
       }
+      $argv += "agent.cost=$cost"
+      $argv += "agent.tokens=$tokens"
       # like `hc ... >/dev/null 2>&1`, but waits the few ms hc takes (at most 3 s): sharing this console
       # (no CreateNoWindow) avoids starting a new hidden console, which would cost far more than the wait
       $psi = [System.Diagnostics.ProcessStartInfo]::new($hc, ((@($argv) | ForEach-Object { Quote-Arg $_ }) -join ' '))

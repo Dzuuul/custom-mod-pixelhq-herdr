@@ -27,6 +27,49 @@ for d in "$HERE"/mods/company-*; do
 done
 rm -rf "$CFG/mods/company-music"   # MusicBox sengaja dihilangin di versi ini
 
+# 2b. hotkey Kanban dan Usage, cuma aktif di layout pixel-hq (bagian "layout:pixel-hq" di keys.json).
+# Tombol yang udah kamu pakai buat hal lain gak ditimpa.
+python3 - "$CFG/keys.json" <<'PY'
+import json, os, sys
+KEYS = {"ctrl-shift-j": "mod.open:company-kanban", "ctrl-shift-m": "mod.open:company-usage"}
+p = sys.argv[1]
+def skip(why):
+    print(why + ": hotkey Kanban/Usage dilewati")
+    sys.exit(0)
+try:
+    with open(p, encoding="utf-8") as fh:
+        d = json.load(fh)
+except FileNotFoundError:
+    skip("keys.json belum ada (jalanin Herdr sekali dulu)")
+except Exception:
+    skip("keys.json gak kebaca sebagai JSON")
+if not isinstance(d, dict):
+    skip("keys.json bukan objek JSON")
+sec = d.get("layout:pixel-hq")
+if not isinstance(sec, dict):
+    sec = {}
+added, skipped = [], []
+for key, act in KEYS.items():
+    if sec.get(key) == act:
+        continue
+    used = [n for n in ("layout:pixel-hq", "terminal", "global") if isinstance(d.get(n), dict) and key in d[n] and d[n][key] != act]
+    if used:
+        skipped.append("%s (udah dipakai di %s)" % (key, used[0]))
+        continue
+    sec[key] = act
+    added.append(key)
+if added:
+    d["layout:pixel-hq"] = sec
+    tmp = "%s.tmp.%d" % (p, os.getpid())
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump(d, fh, indent=2, ensure_ascii=False)
+        fh.write("\n")
+    os.replace(tmp, p)
+    print("Hotkey dipasang: " + ", ".join("%s = %s" % (k, KEYS[k].split(":")[1]) for k in added))
+for s in skipped:
+    print("Hotkey dilewati: " + s)
+PY
+
 # 3. Claude Code: statusLine (buat chip usage) dan hook aktivitas
 if [ -d "$HOME/.claude" ]; then
   cp "$HERE/mods/company-agents/claude-statusline.sh" "$HOME/.claude/pixel-hq-statusline.sh"
