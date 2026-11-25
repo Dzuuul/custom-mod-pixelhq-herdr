@@ -1354,13 +1354,15 @@ export default class Agents extends View {
       + '      except Exception: pass\n'
       + '    sys.exit(1)\n'
       + 'sys.exit(0)\' 2>/dev/null || exit 1; exit 0';
+    // Windows: the PowerShell port (no sh or Python needed), the same command install.ps1 writes.
+    const winSrc = `${appHome()}/mods/company-agents/claude-statusline.ps1`;
     const ps = "param($src); $d = Join-Path $env:USERPROFILE '.claude'; if (-not (Test-Path -LiteralPath $d)) { exit 3 }; "
-      + "$t = Join-Path $d 'pixel-hq-statusline.sh'; Copy-Item -LiteralPath $src -Destination $t -Force; "
-      + "$cfg = Join-Path $d 'settings.json'; $cmd = 'sh ' + ($t -replace '\\\\', '/'); "
+      + "$t = Join-Path $d 'pixel-hq-statusline.ps1'; Copy-Item -LiteralPath $src -Destination $t -Force; "
+      + "$cfg = Join-Path $d 'settings.json'; $q = [char]34; $cmd = 'powershell -NoProfile -ExecutionPolicy Bypass -File ' + $q + ($t -replace '\\\\', '/') + $q; "
       + "$obj = $null; "
       + "if (Test-Path -LiteralPath $cfg) { "
       + "  for ($i = 0; $i -lt 5; $i++) { "
-      + "    try { $raw = Get-Content -Raw -LiteralPath $cfg -ErrorAction Stop; "
+      + "    try { $raw = [System.IO.File]::ReadAllText($cfg, [System.Text.Encoding]::UTF8); "
       + "      $obj = if ($raw.Trim().Length -gt 0) { $raw | ConvertFrom-Json -ErrorAction Stop } else { [pscustomobject]@{} }; break; "
       + "    } catch { Start-Sleep -Milliseconds 200 } "
       + "  }; if ($null -eq $obj) { exit 1 } "
@@ -1371,7 +1373,7 @@ export default class Agents extends View {
       + "  if (-not $obj.statusLine) { $obj | Add-Member -NotePropertyName statusLine -NotePropertyValue ([pscustomobject]@{ type='command'; command=$cmd }) } else { $obj.statusLine.command = $cmd }; "
       + "  $tmp = \"$cfg.tmp.$PID\"; $json = $obj | ConvertTo-Json -Depth 10; "
       + "  for ($i = 0; $i -lt 5; $i++) { "
-      + "    try { [System.IO.File]::WriteAllText($tmp, $json, [System.Text.Encoding]::UTF8); Move-Item -LiteralPath $tmp -Destination $cfg -Force -ErrorAction Stop; break } "
+      + "    try { [System.IO.File]::WriteAllText($tmp, $json, (New-Object System.Text.UTF8Encoding $false)); Move-Item -LiteralPath $tmp -Destination $cfg -Force -ErrorAction Stop; break } "
       + "    catch { Start-Sleep -Milliseconds 200 } "
       + "  } "
       + "}";
@@ -1381,7 +1383,7 @@ export default class Agents extends View {
       const isWin = !on && window()?.platform === "windows";
       let r;
       if (isWin) {
-        r = await exec("powershell", ["-NoProfile", "-NonInteractive", "-Command", `& { ${ps} } '${src.replace(/'/g, "''")}'`]).catch(() => null);
+        r = await exec("powershell", ["-NoProfile", "-NonInteractive", "-Command", `& { ${ps} } '${winSrc.replace(/'/g, "''")}'`]).catch(() => null);
       } else {
         r = await exec("sh", ["-c", sh, "sh", src], { on, timeout: 8000 }).catch(() => null);
       }
@@ -1428,13 +1430,14 @@ export default class Agents extends View {
       + '      except Exception: pass\n'
       + '    sys.exit(1)\n'
       + 'sys.exit(0)\' 2>/dev/null || exit 1; exit 0';
+    const winSrc = `${appHome()}/mods/company-agents/claude-statusline.ps1`;
     const ps = "param($src); $d = Join-Path $env:USERPROFILE '.gemini\\antigravity-cli'; if (-not (Test-Path -LiteralPath $d)) { exit 3 }; "
-      + "$t = Join-Path $d 'pixel-hq-statusline.sh'; Copy-Item -LiteralPath $src -Destination $t -Force; "
-      + "$cfg = Join-Path $d 'settings.json'; $cmd = 'sh ' + ($t -replace '\\\\', '/'); "
+      + "$t = Join-Path $d 'pixel-hq-statusline.ps1'; Copy-Item -LiteralPath $src -Destination $t -Force; "
+      + "$cfg = Join-Path $d 'settings.json'; $q = [char]34; $cmd = 'powershell -NoProfile -ExecutionPolicy Bypass -File ' + $q + ($t -replace '\\\\', '/') + $q; "
       + "$obj = $null; "
       + "if (Test-Path -LiteralPath $cfg) { "
       + "  for ($i = 0; $i -lt 5; $i++) { "
-      + "    try { $raw = Get-Content -Raw -LiteralPath $cfg -ErrorAction Stop; "
+      + "    try { $raw = [System.IO.File]::ReadAllText($cfg, [System.Text.Encoding]::UTF8); "
       + "      $obj = if ($raw.Trim().Length -gt 0) { $raw | ConvertFrom-Json -ErrorAction Stop } else { [pscustomobject]@{} }; break; "
       + "    } catch { Start-Sleep -Milliseconds 200 } "
       + "  }; if ($null -eq $obj) { exit 1 } "
@@ -1446,7 +1449,7 @@ export default class Agents extends View {
       + "  if (-not $obj.statusLine) { $obj | Add-Member -NotePropertyName statusLine -NotePropertyValue ([pscustomobject]@{ type='command'; command=$cmd; enabled=$true }) } else { $obj.statusLine.command = $cmd; $obj.statusLine.enabled = $true }; "
       + "  $tmp = \"$cfg.tmp.$PID\"; $json = $obj | ConvertTo-Json -Depth 10; "
       + "  for ($i = 0; $i -lt 5; $i++) { "
-      + "    try { [System.IO.File]::WriteAllText($tmp, $json, [System.Text.Encoding]::UTF8); Move-Item -LiteralPath $tmp -Destination $cfg -Force -ErrorAction Stop; break } "
+      + "    try { [System.IO.File]::WriteAllText($tmp, $json, (New-Object System.Text.UTF8Encoding $false)); Move-Item -LiteralPath $tmp -Destination $cfg -Force -ErrorAction Stop; break } "
       + "    catch { Start-Sleep -Milliseconds 200 } "
       + "  } "
       + "}";
@@ -1456,7 +1459,7 @@ export default class Agents extends View {
       const isWin = !on && window()?.platform === "windows";
       let r;
       if (isWin) {
-        r = await exec("powershell", ["-NoProfile", "-NonInteractive", "-Command", `& { ${ps} } '${src.replace(/'/g, "''")}'`]).catch(() => null);
+        r = await exec("powershell", ["-NoProfile", "-NonInteractive", "-Command", `& { ${ps} } '${winSrc.replace(/'/g, "''")}'`]).catch(() => null);
       } else {
         r = await exec("sh", ["-c", sh, "sh", src], { on, timeout: 8000 }).catch(() => null);
       }

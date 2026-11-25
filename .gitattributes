@@ -1,0 +1,4 @@
+# Skrip shell harus LF (jalan di Linux), skrip Windows CRLF (cmd.exe kurang akur dengan LF).
+*.sh text eol=lf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
