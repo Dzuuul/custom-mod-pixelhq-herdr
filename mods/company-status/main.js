@@ -111,6 +111,13 @@ export default class WorkspaceStatus extends View {
     return parts.map((p) => mod[p.toLowerCase()] ?? p.toUpperCase()).join("");
   }
 
+  // Isi chip KANBAN: yang jalan (atau antrean), lalu yang perlu kamu urus: nanya balik, ditahan usage, gagal.
+  kanbanText() {
+    const c = this.kb?.counts ?? {};
+    return ["KANBAN", c.doing ? `${c.doing} JALAN` : c.todo ? String(c.todo) : "", c.asking ? `${c.asking} NANYA` : "",
+      c.held ? `${c.held} DITAHAN` : "", c.failed ? `${c.failed} GAGAL` : ""].filter(Boolean).join(" · ");
+  }
+
   hint(t) {
     const mac = window()?.platform === "macos";
     const mod = { cmd: mac ? "⌘" : "Ctrl+", ctrl: mac ? "⌃" : "Ctrl+", shift: mac ? "⇧" : "Shift+", alt: mac ? "⌥" : "Alt+", option: mac ? "⌥" : "Alt+" };
@@ -195,7 +202,7 @@ export default class WorkspaceStatus extends View {
           .id("btn-kanban")
           .tooltip(`Buka papan kanban${this.keyOf("mod.open:company-kanban") ? ` (${this.keyOf("mod.open:company-kanban")})` : ""}: task yang dipindah ke 'sedang dikerjakan' dikerjain agent otomatis`)
           .on_click(() => run("mod.open", { name: "company-kanban" }))
-          .child(`KANBAN${this.kb?.counts?.doing ? ` · ${this.kb.counts.doing} JALAN` : this.kb?.counts?.todo ? ` · ${this.kb.counts.todo}` : ""}${this.kb?.counts?.failed ? ` · ${this.kb.counts.failed} GAGAL` : ""}`)
+          .child(this.kanbanText())
       )
       .child(
         chip(h_flex(), t)

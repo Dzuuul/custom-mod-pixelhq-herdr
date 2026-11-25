@@ -70,6 +70,24 @@ for s in skipped:
     print("Hotkey dilewati: " + s)
 PY
 
+# 2c. perintah terminal `pixel-hq-task` (tambah task ke kanban dari terminal/skrip), di ~/.local/bin.
+# Isinya cuma memanggil skrip di folder mod, jadi ikut terbarui waktu mod-nya diperbarui.
+BIN="$HOME/.local/bin"; TASKCMD="$BIN/pixel-hq-task"
+if { [ -e "$TASKCMD" ] || [ -L "$TASKCMD" ]; } && ! grep -q 'custom Pixel HQ' "$TASKCMD" 2>/dev/null; then
+  echo "$TASKCMD udah ada dan bukan punya Pixel HQ, gak ditimpa."
+else
+  mkdir -p "$BIN"
+  cat > "$TASKCMD" <<EOF
+#!/bin/sh
+# pixel-hq-task: dipasang custom Pixel HQ (install.sh), dicopot uninstall.sh. Tambah task ke kanban Herdr.
+export HERDR_APP_HOME="\${HERDR_APP_HOME:-$CFG}"
+exec python3 "$CFG/mods/company-kanban/pixel-hq-task.py" "\$@"
+EOF
+  chmod +x "$TASKCMD"
+  echo "Perintah terminal dipasang: pixel-hq-task \"judul task\"   (bantuan: pixel-hq-task -h)"
+  case ":$PATH:" in *":$BIN:"*) ;; *) echo "  $BIN belum ada di PATH: jalankan $TASKCMD, atau tambahkan folder itu ke PATH." ;; esac
+fi
+
 # 3. Claude Code: statusLine (buat chip usage) dan hook aktivitas
 if [ -d "$HOME/.claude" ]; then
   cp "$HERE/mods/company-agents/claude-statusline.sh" "$HOME/.claude/pixel-hq-statusline.sh"

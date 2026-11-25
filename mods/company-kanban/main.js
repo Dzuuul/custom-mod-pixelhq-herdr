@@ -1,9 +1,10 @@
 // Papan kanban: antrean, sedang dikerjakan, selesai. Tiap task terikat ke satu space (sesi).
 // Task yang dipindah ke "Sedang dikerjakan" dikirim otomatis ke agent di space itu oleh
 // company-status/kanban.js (mesinnya hidup terus, dialog ini cuma tampilan). Data: ~/.config/herdr-app/pixel-hq-kanban.json
+// Task juga bisa ditambah dari terminal: pixel-hq-task "judul" (pixel-hq-task.py / .ps1 di folder ini).
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
-import { spaces, agents, shared, theme, appHome, readTextFile, writeTextFile, closeOverlay, props, pickFolder, pickFiles, notify } from "herdr";
+import { spaces, agents, shared, theme, appHome, readTextFile, writeTextFile, closeOverlay, props, pickFolder, pickFiles, notify, run } from "herdr";
 
 const staffName = (a) => {
   const own = (shared("pixel-hq.names") ?? {})[a.pane]?.name; // nama acak/pilihan sendiri (company-agents/names.js)
@@ -26,9 +27,10 @@ const COLS = [
   { id: "done", label: "SELESAI", color: "#a6e3a1" },
 ];
 // Field yang diisi mesin selama task jalan; dibuang tiap task dipindah atau diulang.
-const RUNTIME = ["sentAt", "agent", "seen", "byTab", "finishedAt", "preIdx", "prevSaved", "prevModel", "prevEffort", "tries", "failed", "failedAt", "overdue", "result", "resultWanted", "startedAt", "stopWanted", "stopped"];
+const RUNTIME = ["sentAt", "agent", "seen", "byTab", "finishedAt", "preIdx", "prevSaved", "prevModel", "prevEffort", "tries", "failed", "failedAt", "overdue", "result", "resultWanted", "resultAt",
+  "startedAt", "stopWanted", "stopped", "asking", "askingSince", "askedMs", "held", "noHold", "notifyDone", "cost", "tokens", "costStart", "tokStart"];
 // Pilihan task yang boleh kosong; dibuang dulu tiap task disimpan dari form, lalu diisi lagi yang dipilih.
-const OPTIONAL = ["model", "effort", "priority", "limitMin", "after", "afterTitle", "target", "targetName"];
+const OPTIONAL = ["model", "effort", "priority", "limitMin", "limitStop", "after", "afterTitle", "target", "targetName"];
 // Apakah `t` (lewat rantai "SETELAH") nunggu task `id`. Dipakai biar edit gak bikin task saling nunggu selamanya.
 const waitsFor = (t, id, byId) => {
   const seen = new Set();
@@ -44,6 +46,9 @@ const fmtDur = (ms) => {
   if (m) return `${m} mnt ${s % 60} dtk`;
   return `${s} dtk`;
 };
+const fmtTok = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${Math.round(n / 1e3)}k` : String(n));
+// Biaya dan token task (dari label statusline staf, dihitung mesin kanban). "" kalau belum ada angkanya.
+const costText = (t) => [typeof t.cost === "number" && t.cost > 0 && `$${t.cost.toFixed(2)}`, typeof t.tokens === "number" && t.tokens > 0 && `${fmtTok(t.tokens)} token`].filter(Boolean).join(" · ");
 const stamp = () => { const d = new Date(), p = (n) => String(n).padStart(2, "0"); return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}`; };
 const sortedIn = (tasks, col) => {
   const l = tasks.filter((x) => x.column === col);
@@ -69,7 +74,8 @@ function toMarkdown(tasks) {
     out.push(`## ${c.label} (${tasks.filter((t) => t.column === c.id).length})`, ``);
     for (const t of sortedIn(tasks, c.id)) {
       const tags = [t.spaceName, t.priority && t.priority !== "normal" && `prioritas ${t.priority}`, t.model, t.effort, t.targetName, t.failed && (t.stopped ? "DIHENTIKAN" : `GAGAL: ${t.failed}`),
-        t.sentAt && t.finishedAt && `durasi ${fmtDur(t.finishedAt - t.sentAt)}`].filter(Boolean);
+        !t.failed && t.asking && "PERLU JAWABAN", !t.failed && t.held && "DITAHAN (usage)", t.limitMin && `batas ${t.limitMin} mnt${t.limitStop ? ", lewat = dihentikan" : ""}`,
+        t.sentAt && t.finishedAt && `durasi ${fmtDur(t.finishedAt - t.sentAt)}`, costText(t)].filter(Boolean);
       out.push(`- [${c.id === "done" ? "x" : " "}] **${t.title}**${tags.length ? ` (${tags.join(", ")})` : ""}`);
       if (t.detail) out.push(`  ${t.detail.replace(/\n/g, "\n  ")}`);
       if (t.result) out.push(``, `  > ${t.result.slice(0, 600).replace(/\n/g, "\n  > ")}`, ``);
@@ -89,6 +95,7 @@ export default class Kanban extends View {
     this.effortIdx = 0;
     this.priIdx = 0;
     this.limitIdx = 0;
+    this.limitStop = false; // lewat batas waktu: true = agent dihentikan, false = cuma diingatkan
     this.afterIdx = 0;
     this.editing = null; // id task yang lagi diedit di form, atau null (form bikin task baru)
     this.open = new Set(); // kartu yang hasil kerjanya dibuka penuh
@@ -144,7 +151,7 @@ export default class Kanban extends View {
     if (this.modelIdx) f.model = MODELS[this.modelIdx - 1];
     if (this.effortIdx) f.effort = EFFORTS[this.effortIdx - 1];
     if (this.priIdx) f.priority = PRIORITIES[this.priIdx];
-    if (this.limitIdx) f.limitMin = LIMITS[this.limitIdx];
+    if (this.limitIdx) { f.limitMin = LIMITS[this.limitIdx]; if (this.limitStop) f.limitStop = true; }
     const dep = this.afterChoices()[this.afterIdx - 1];
     if (dep) { f.after = dep.id; f.afterTitle = dep.title; }
     if (pick) { f.target = pick.address; f.targetName = this.agentLabel(pick); }
@@ -176,6 +183,7 @@ export default class Kanban extends View {
     this.effortIdx = task.effort ? EFFORTS.indexOf(task.effort) + 1 : 0;
     this.priIdx = Math.max(0, PRIORITIES.indexOf(task.priority ?? "normal"));
     this.limitIdx = Math.max(0, LIMITS.indexOf(task.limitMin ?? 0));
+    this.limitStop = Boolean(task.limitStop);
     this.afterIdx = task.after ? this.afterChoices().findIndex((x) => x.id === task.after) + 1 : 0;
     this.title.focus();
     const lost = [si < 0 && `space "${task.spaceName ?? "?"}"`, task.target && ai < 0 && `staf ${task.targetName ?? "?"}`].filter(Boolean);
@@ -233,6 +241,33 @@ export default class Kanban extends View {
       const t = d.tasks.find((x) => x.id === id);
       if (!t || t.column !== "doing" || t.failed) return;
       t.stopWanted = true; t.note = "Menghentikan…";
+    }, cx);
+  }
+
+  // Buka terminal staf yang pegang task ini (buat lihat kerjanya atau jawab pertanyaannya). Dialog ditutup biar gak nutupin.
+  look(task, cx) {
+    const a = task.agent ? agents().find((x) => x.address === task.agent) : null;
+    if (!a) { this.say("Stafnya udah gak ada (terminalnya ditutup).", cx); return; }
+    try { run("agent.focus", { terminal: a.address }); } catch (e) { this.say(`Gagal buka terminal: ${e?.message ?? e}`, cx); return; }
+    const overlay = props()?.overlay;
+    if (overlay) closeOverlay(overlay);
+  }
+
+  // Task yang stafnya nanya balik, tapi kamu anggap udah beres: pindah ke Selesai, hasilnya tetap disimpan.
+  markDone(id, cx) {
+    this.change((d) => {
+      const t = d.tasks.find((x) => x.id === id);
+      if (!t || !t.asking || t.column !== "doing") return;
+      delete t.asking; t.column = "done"; t.finishedAt = Date.now(); t.note = "Kamu tandai kelar";
+    }, cx);
+  }
+
+  // Task yang ditahan karena usage Claude hampir habis: kirim sekarang juga.
+  sendAnyway(id, cx) {
+    this.change((d) => {
+      const t = d.tasks.find((x) => x.id === id);
+      if (!t || t.column !== "doing" || t.failed || t.sentAt) return;
+      t.noHold = true; t.note = "Dikirim walau usage hampir habis…";
     }, cx);
   }
 
@@ -339,11 +374,16 @@ export default class Kanban extends View {
     const shown = opened ? result : result.split("\n").filter((l) => l.trim()).slice(0, 3).join("\n").slice(0, 280);
     const editing = this.editing === task.id;
     const canEdit = task.column === "todo" || Boolean(task.failed);
-    const canStop = task.column === "doing" && Boolean(task.sentAt && task.agent) && !task.failed && !task.stopWanted;
-    const edge = editing ? "#89b4fa" : task.stopped ? "#fab387" : task.failed ? "#f38ba8" : task.overdue ? "#f9b84a" : t.border;
+    const asking = Boolean(task.asking && !task.failed && task.column === "doing"), held = Boolean(task.held && !task.failed && task.column === "doing" && !task.sentAt);
+    const canStop = task.column === "doing" && Boolean(task.sentAt && task.agent) && !task.failed && !task.stopWanted && !asking;
+    const canLook = Boolean(task.agent) && agents().some((a) => a.address === task.agent);
+    const cost = costText(task);
+    const edge = editing ? "#89b4fa" : task.stopped ? "#fab387" : task.failed ? "#f38ba8" : asking ? "#f5c2e7" : held ? "#94e2d5" : task.overdue ? "#f9b84a" : t.border;
     return v_flex().id(`card-${task.id}`).gap(5).p(9).bg(t.surface).border_1().border_color(edge).rounded(6)
       .child(h_flex().gap(6).items_center()
         .when(Boolean(task.failed), (el) => el.child(task.stopped ? this.tag("DIHENTIKAN", "#fab387") : this.tag("GAGAL", "#f38ba8")))
+        .when(asking, (el) => el.child(this.tag("PERLU JAWABAN", "#f5c2e7")))
+        .when(held, (el) => el.child(this.tag("DITAHAN", "#94e2d5")))
         .when(editing, (el) => el.child(this.tag("LAGI DIEDIT", "#89b4fa")))
         .child(div().flex_1().min_w(0).text_size(12.5).font_semibold().text_color(t.foreground).child(task.title)))
       .when(Boolean(task.detail), (el) => el.child(div().text_size(11).text_color(t.muted).child(task.detail)))
@@ -354,20 +394,27 @@ export default class Kanban extends View {
         .when(Boolean(task.targetName), (el) => el.child(this.tag(task.targetName, "#f9b84a")))
         .when(Boolean(task.after), (el) => el.child(this.tag(`⛓ setelah: ${(dep?.title ?? task.afterTitle ?? "?").slice(0, 24)}${dep?.column === "done" ? " ✓" : ""}`, dep?.column === "done" ? "#a6e3a1" : "#89dceb")))
         .when(Boolean(dur), (el) => el.child(this.tag(`⏱ ${dur}${task.limitMin ? ` / ${task.limitMin} mnt` : ""}`, task.overdue ? "#f9b84a" : t.muted)))
-        .when(Boolean(!dur && task.limitMin), (el) => el.child(this.tag(`batas ${task.limitMin} mnt`, t.muted)))
+        .when(Boolean(!dur && task.limitMin), (el) => el.child(this.tag(`batas ${task.limitMin} mnt${task.limitStop ? " ■" : ""}`, t.muted)))
+        .when(Boolean(dur && task.limitStop && !task.failed), (el) => el.child(this.tag("lewat = stop", t.dim)))
+        .when(Boolean(cost), (el) => el.child(this.tag(cost, "#a6e3a1")))
+        .when(task.source === "terminal", (el) => el.child(this.tag("⌨ terminal", t.dim)))
         .when(Boolean(task.overdue && task.column === "doing"), (el) => el.child(this.tag("LEWAT BATAS", "#f9b84a")))
         .when(Boolean(task.restore?.length), (el) => el.child(this.tag("ngembaliin model…", "#cba6f7"))))
-      .when(Boolean(task.note), (el) => el.child(div().text_size(10).text_color(task.stopped ? "#fab387" : task.failed ? "#f38ba8" : task.column === "doing" ? "#f9b84a" : t.dim).child(task.note)))
+      .when(Boolean(task.note), (el) => el.child(div().text_size(10).text_color(task.stopped ? "#fab387" : task.failed ? "#f38ba8" : asking ? "#f5c2e7" : held ? "#94e2d5" : task.column === "doing" ? "#f9b84a" : t.dim).child(task.note)))
       .when(Boolean(result), (el) => el.child(v_flex().id(`hasil-${task.id}`).gap(3).p(7).bg(t.background).rounded(4).cursor_pointer()
         .tooltip(opened ? "Klik buat ringkas" : "Klik buat lihat hasil lengkap")
         .on_click((_e, cx) => { if (opened) this.open.delete(task.id); else this.open.add(task.id); cx.notify(); })
-        .child(div().text_size(9.5).font_bold().text_color("#a6e3a1").child(opened ? "HASIL ▾" : "HASIL ▸"))
+        .child(div().text_size(9.5).font_bold().text_color(asking ? "#f5c2e7" : "#a6e3a1").child(`${asking ? "PERTANYAAN STAF" : "HASIL"} ${opened ? "▾" : "▸"}`))
         .child(div().text_size(10.5).text_color(t.muted).child(shown + (!opened && shown.length < result.length ? " …" : "")))))
       .child(h_flex().gap(4).flex_wrap()
         .when(i > 0, (el) => el.child(this.btn(`l-${task.id}`, "◀", t.muted, (cx) => this.move(task.id, COLS[i - 1].id, cx), `Pindah ke ${COLS[i - 1].label.toLowerCase()}`)))
         .when(i < COLS.length - 1, (el) => el.child(this.btn(`r-${task.id}`, i === 0 ? "KERJAKAN ▶" : "▶", i === 0 ? "#f9b84a" : t.muted, (cx) => this.move(task.id, COLS[i + 1].id, cx), i === 0 ? "Pindah ke sedang dikerjakan: agent di space ini langsung ngerjain" : `Pindah ke ${COLS[i + 1].label.toLowerCase()}`)))
         .when(canStop, (el) => el.child(this.btn(`s-${task.id}`, "STOP ■", "#fab387", (cx) => this.stop(task.id, cx), "Suruh agent berhenti ngerjain task ini (tombol stop, sama kayak Esc). Kartunya ditandai dihentikan; ULANGI buat kirim lagi.")))
         .when(Boolean(task.stopWanted && task.column === "doing"), (el) => el.child(this.tag("menghentikan…", "#fab387")))
+        .when(canLook, (el) => el.child(this.btn(`v-${task.id}`, asking ? "JAWAB ▸" : "LIHAT ▸", asking ? "#f5c2e7" : "#89dceb", (cx) => this.look(task, cx),
+          asking ? "Buka terminal staf buat jawab pertanyaannya. Setelah dijawab, task jalan lagi sendiri." : "Buka terminal staf yang pegang task ini")))
+        .when(asking, (el) => el.child(this.btn(`k-${task.id}`, "KELAR ✓", "#a6e3a1", (cx) => this.markDone(task.id, cx), "Anggap task ini udah beres tanpa jawab pertanyaannya (pindah ke Selesai)")))
+        .when(held, (el) => el.child(this.btn(`h-${task.id}`, "KIRIM AJA", "#94e2d5", (cx) => this.sendAnyway(task.id, cx), "Kirim sekarang walau usage Claude hampir habis")))
         .when(Boolean(task.failed) || task.column === "done", (el) => el.child(this.btn(`u-${task.id}`, "ULANGI ↻", "#f38ba8", (cx) => this.retry(task.id, cx), "Kirim ulang task ini ke agent")))
         .when(canEdit && !editing, (el) => el.child(this.btn(`e-${task.id}`, "EDIT", "#89b4fa", (cx) => this.startEdit(task, cx), "Ubah judul, detail, dan pilihan task ini di form atas")))
         .when(canUp, (el) => el.child(this.btn(`up-${task.id}`, "▲", t.muted, (cx) => this.nudge(task.id, -1, cx), "Naikkan urutan")))
@@ -405,7 +452,9 @@ export default class Kanban extends View {
     const priBtn = cyc("pilih-prio", `PRIORITAS: ${PRIORITIES[this.priIdx]} ▾`, this.priIdx,
       "Prioritas tinggi dikirim duluan kalau beberapa task nunggu staf yang sama.", () => { this.priIdx = (this.priIdx + 1) % PRIORITIES.length; }, PRI_COLOR[PRIORITIES[this.priIdx]] ?? "#cba6f7");
     const limitBtn = cyc("pilih-batas", `BATAS: ${this.limitIdx ? `${LIMITS[this.limitIdx]} mnt` : "tanpa"} ▾`, this.limitIdx,
-      "Batas waktu. Lewat batas = muncul notifikasi dan kartunya ditandai (task-nya gak dihentikan).", () => { this.limitIdx = (this.limitIdx + 1) % LIMITS.length; }, "#f9b84a");
+      "Batas waktu kerja agent. Lewat batas = notifikasi dan kartunya ditandai; atur di LEWAT BATAS apakah agent sekalian dihentikan.", () => { this.limitIdx = (this.limitIdx + 1) % LIMITS.length; }, "#f9b84a");
+    const overBtn = cyc("pilih-lewat", `LEWAT BATAS: ${this.limitStop ? "hentikan" : "ingatkan"} ▾`, this.limitStop,
+      "Ingatkan = cuma notifikasi. Hentikan = agent disuruh berhenti (kayak tombol STOP), kartunya ditandai dihentikan dan bisa diulang.", () => { this.limitStop = !this.limitStop; }, "#fab387");
     const deps = this.afterChoices();
     if (this.afterIdx > deps.length) this.afterIdx = 0;
     const dep = deps[this.afterIdx - 1];
@@ -421,14 +470,16 @@ export default class Kanban extends View {
         .child(h_flex().gap(6).child(spaceBtn).child(agentBtn))
         .child(h_flex().gap(6).child(modelBtn).child(effortBtn))
         .child(h_flex().gap(6).child(priBtn).child(limitBtn))
+        .when(this.limitIdx > 0, (el) => el.child(h_flex().gap(6).child(overBtn)))
         .child(h_flex().gap(6).child(afterBtn).child(div().flex_1()).child(addBtn))
       : v_flex().gap(8)
         .child(h_flex().gap(8).items_center().child(field(this.title)).child(field(this.detail, 260)).child(addBtn))
-        .child(h_flex().gap(6).items_center().flex_wrap().child(spaceBtn).child(agentBtn).child(modelBtn).child(effortBtn).child(priBtn).child(limitBtn).child(afterBtn));
+        .child(h_flex().gap(6).items_center().flex_wrap().child(spaceBtn).child(agentBtn).child(modelBtn).child(effortBtn).child(priBtn).child(limitBtn).when(this.limitIdx > 0, (el) => el.child(overBtn)).child(afterBtn));
     const column = (c, full) => {
-      const list = sortedIn(this.tasks, c.id), failed = list.filter((x) => x.failed && !x.stopped).length;
+      const list = sortedIn(this.tasks, c.id), failed = list.filter((x) => x.failed && !x.stopped).length, asking = list.filter((x) => x.asking && !x.failed).length;
       return v_flex().flex_1().h_full().min_w(0).gap(8).p(8).bg(t.background).rounded(8)
         .child(h_flex().gap(6).items_center().child(div().size(7).bg(c.color)).child(div().text_size(11).font_bold().text_color(c.color).child(c.label)).child(div().text_size(10).text_color(t.dim).child(String(list.length)))
+          .when(asking > 0, (el) => el.child(div().text_size(10).text_color("#f5c2e7").child(`${asking} nanya`)))
           .when(failed > 0, (el) => el.child(div().text_size(10).text_color("#f38ba8").child(`${failed} gagal`)))
           .when(c.id === "done" && list.length > 0, (el) => el.child(div().flex_1()).child(this.btn(`bersih-${full ? "f" : "c"}`, "BERSIHKAN", t.dim, (cx) => this.clearDone(cx), "Hapus semua task di Selesai"))))
         .child(v_flex().id(`kol-${c.id}${full ? "" : "-c"}`).flex_1().min_h(0).gap(8).overflow_y_scrollbar()

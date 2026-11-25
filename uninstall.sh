@@ -1,6 +1,6 @@
 #!/bin/sh
 # Copot custom Pixel HQ dari Herdr dan Claude Code di komputer ini.
-#   sh uninstall.sh            copot mod, layout, tema, hook, statusLine, dan hotkey Pixel HQ (data kanban & usage disimpan)
+#   sh uninstall.sh            copot mod, layout, tema, hook, statusLine, hotkey, dan pixel-hq-task (data kanban & usage disimpan)
 #   sh uninstall.sh --purge    sekalian hapus data kanban dan riwayat usage
 #   sh uninstall.sh --restore  bukan copot: kembalikan kondisi dari backup terbaru yang dibuat install.sh
 #   sh uninstall.sh --restore FILE   sama, tapi dari backup tertentu (lihat daftar: ls ~/backups/herdr/)
@@ -28,6 +28,13 @@ leave_layout() {
   return 0
 }
 
+# perintah terminal pixel-hq-task dari install.sh (bukan bagian backup, jadi dicopot juga waktu --restore)
+drop_task_cmd() {
+  T="$HOME/.local/bin/pixel-hq-task"
+  if [ -f "$T" ] && grep -q 'custom Pixel HQ' "$T" 2>/dev/null; then rm -f "$T"; echo "Perintah pixel-hq-task dicopot"; fi
+  return 0
+}
+
 # backup kondisi sekarang (sama seperti install.sh: kode tar 1 = ada file yang berubah saat dibaca, masih valid)
 BK="$HOME/backups/herdr/sebelum-uninstall-pixelhq-$(date +%Y%m%d-%H%M%S).tar.gz"
 mkdir -p "$(dirname "$BK")"
@@ -44,6 +51,7 @@ if [ "$MODE" = "restore" ]; then
   # buang mod company-* dulu, biar mod yang gak ada di backup (mis. company-kanban) gak tertinggal
   for d in "$CFG"/mods/company-*; do [ -d "$d" ] && rm -rf "$d"; done
   tar xzf "$LAST" -C "$HOME"
+  drop_task_cmd
   echo "Dipulihkan dari $LAST"
   echo "Restart Herdr biar semuanya kepake."
   exit 0
@@ -77,6 +85,7 @@ rm -f "$HOME/.claude/pixel-hq-statusline.sh"
 leave_layout
 for d in "$CFG"/mods/company-*; do [ -d "$d" ] && rm -rf "$d"; done
 rm -f "$CFG/layouts/pixel-hq.json" "$CFG/themes/pixel-hq.json"
+drop_task_cmd
 echo "Mod company-*, layout, dan tema pixel-hq dihapus"
 # hotkey Kanban/Usage yang dipasang install.sh, cuma yang masih menunjuk ke mod Pixel HQ
 if [ -f "$CFG/keys.json" ]; then
@@ -107,7 +116,7 @@ fi
 
 # 3. data
 if [ "$MODE" = "purge" ]; then
-  rm -f "$CFG/pixel-hq-kanban.json"
+  rm -f "$CFG/pixel-hq-kanban.json" "$CFG/pixel-hq-kanban-inbox.json" "$CFG/pixel-hq-kanban-inbox.json.lock"
   rm -rf "$HOME/.local/state/pixel-hq"
   echo "Data kanban dan riwayat usage dihapus"
 else

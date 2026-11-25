@@ -182,6 +182,32 @@ function Set-PixelHotkeys([string]$file) {
 }
 Set-PixelHotkeys (Join-Path $Cfg 'keys.json')
 
+# 5. perintah terminal pixel-hq-task (tambah task ke kanban dari terminal/skrip). Pemanggilnya ditaruh di folder
+# WindowsApps milikmu (biasanya sudah ada di PATH); isinya cuma memanggil skrip di folder mod, jadi ikut terbarui.
+function Set-TaskCommand {
+  $direct = Join-Path $Cfg 'mods\company-kanban\pixel-hq-task.cmd'
+  $dir = if ($env:LOCALAPPDATA) { Join-Path $env:LOCALAPPDATA 'Microsoft\WindowsApps' } else { '' }
+  $onPath = $dir -and (@($env:Path -split ';' | Where-Object { $_ } | ForEach-Object { $_.TrimEnd('\') }) -contains $dir.TrimEnd('\'))
+  if (-not $onPath -or -not (Test-Path -LiteralPath $dir -PathType Container)) {
+    Write-Host "Perintah terminal: `"$direct`" `"judul task`"  (folder WindowsApps gak ada di PATH, jadi pakai jalur lengkap)"
+    return
+  }
+  $shim = Join-Path $dir 'pixel-hq-task.cmd'
+  if ((Test-Path -LiteralPath $shim) -and -not ((Get-Content -LiteralPath $shim -Raw) -match 'dipasang custom Pixel HQ')) {
+    Write-Host "$shim udah ada dan bukan punya Pixel HQ, gak ditimpa." -ForegroundColor Yellow
+    return
+  }
+  $script = Join-Path $Cfg 'mods\company-kanban\pixel-hq-task.ps1'
+  $lines = @('@echo off', 'rem pixel-hq-task: dipasang custom Pixel HQ (install.ps1), dicopot uninstall.ps1.', 'setlocal',
+    "if not defined HERDR_APP_HOME set `"HERDR_APP_HOME=$Cfg`"",
+    "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$script`" %*", 'exit /b %ERRORLEVEL%')
+  # cmd.exe membaca file .cmd pakai code page OEM, jadi jalur dengan huruf non-ASCII ditulis pakai itu juga
+  $oem = [System.Text.Encoding]::GetEncoding([System.Globalization.CultureInfo]::CurrentCulture.TextInfo.OEMCodePage)
+  [System.IO.File]::WriteAllText($shim, ($lines -join "`r`n") + "`r`n", $oem)
+  Write-Host 'Perintah terminal dipasang: pixel-hq-task "judul task"   (bantuan: pixel-hq-task -h)'
+}
+Set-TaskCommand
+
 Write-Host ''
 Write-Host 'Selesai. Aktifkan layout-nya:'
 Write-Host '  herdr-app do layout.switch --name pixel-hq'

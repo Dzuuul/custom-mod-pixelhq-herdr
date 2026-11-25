@@ -1,5 +1,5 @@
 # Copot custom Pixel HQ dari Herdr dan Claude Code di Windows (versi Windows dari uninstall.sh).
-#   uninstall.cmd                    copot mod, layout, tema, hook, statusLine, dan hotkey Pixel HQ (data kanban & usage disimpan)
+#   uninstall.cmd                    copot mod, layout, tema, hook, statusLine, hotkey, dan pixel-hq-task (data kanban & usage disimpan)
 #   uninstall.cmd -Purge             sekalian hapus data kanban dan riwayat usage
 #   uninstall.cmd -Restore           bukan copot: kembalikan kondisi dari backup terbaru yang dibuat install.ps1
 #   uninstall.cmd -Restore FILE.zip  sama, tapi dari backup tertentu (lihat daftar: dir %USERPROFILE%\backups\herdr)
@@ -114,6 +114,16 @@ function New-Backup {
   if ($skipped.Count) { Write-Host ("  (gak kebaca, lagi dikunci program lain: " + ($skipped -join ', ') + ")") -ForegroundColor Yellow }
 }
 
+# perintah terminal pixel-hq-task dari install.ps1 (bukan bagian backup, jadi dicopot juga waktu -Restore)
+function Remove-TaskCommand {
+  if (-not $env:LOCALAPPDATA) { return }
+  $shim = Join-Path $env:LOCALAPPDATA 'Microsoft\WindowsApps\pixel-hq-task.cmd'
+  if ((Test-Path -LiteralPath $shim -PathType Leaf) -and ((Get-Content -LiteralPath $shim -Raw) -match 'dipasang custom Pixel HQ')) {
+    Remove-Item -LiteralPath $shim -Force
+    Write-Host 'Perintah pixel-hq-task dicopot'
+  }
+}
+
 # pindah dari layout pixel-hq dulu kalau Herdr lagi jalan, biar gak error waktu mod-nya hilang
 function Leave-Layout {
   $exe = Get-Command herdr-app -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -168,6 +178,7 @@ if ($Restore) {
       } catch { $failed += $rel }
     }
   } finally { $zip.Dispose() }
+  Remove-TaskCommand
   Write-Host "Dipulihkan dari $last"
   if ($failed.Count) { Write-Host ("Gak bisa dipulihkan (lagi dikunci? tutup Herdr lalu ulangi): " + ($failed -join ', ')) -ForegroundColor Yellow }
   Write-Host 'Restart Herdr biar semuanya kepake.'
@@ -213,6 +224,7 @@ foreach ($f in 'layouts\pixel-hq.json', 'themes\pixel-hq.json') {
   if (Test-Path -LiteralPath $p -PathType Leaf) { Remove-Item -LiteralPath $p -Force }
 }
 Write-Host 'Mod company-*, layout, dan tema pixel-hq dihapus'
+Remove-TaskCommand
 # hotkey Kanban/Usage yang dipasang install.ps1, cuma yang masih menunjuk ke mod Pixel HQ
 $PixelKeys = [ordered]@{ 'ctrl-shift-j' = 'mod.open:company-kanban'; 'ctrl-shift-m' = 'mod.open:company-usage' }
 $keysFile = Join-Path $Cfg 'keys.json'
@@ -237,8 +249,10 @@ if ($null -ne $k) {
 # 3. data
 $state = Join-Path $UserHome '.local\state\pixel-hq'
 if ($Purge) {
-  $kb = Join-Path $Cfg 'pixel-hq-kanban.json'
-  if (Test-Path -LiteralPath $kb -PathType Leaf) { Remove-Item -LiteralPath $kb -Force }
+  foreach ($f in 'pixel-hq-kanban.json', 'pixel-hq-kanban-inbox.json', 'pixel-hq-kanban-inbox.json.lock') {
+    $kb = Join-Path $Cfg $f
+    if (Test-Path -LiteralPath $kb -PathType Leaf) { Remove-Item -LiteralPath $kb -Force }
+  }
   if (Test-Path -LiteralPath $state) { Remove-Item -LiteralPath $state -Recurse -Force }
   Write-Host 'Data kanban dan riwayat usage dihapus'
 } else {
