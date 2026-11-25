@@ -11,7 +11,12 @@ command -v python3 >/dev/null || { echo "python3 dibutuhin." >&2; exit 1; }
 BK="$HOME/backups/herdr/sebelum-custom-pixelhq-$(date +%Y%m%d-%H%M%S).tar.gz"
 mkdir -p "$(dirname "$BK")"
 FILES="${CFG#$HOME/}"; [ -f "$HOME/.claude/settings.json" ] && FILES="$FILES .claude/settings.json"
-tar czf "$BK" --exclude='herdr-app.sock' -C "$HOME" $FILES && echo "Backup kondisi lama: $BK"
+# Herdr yang lagi jalan terus nulis file, jadi GNU tar bisa keluar dengan kode 1 ("file changed").
+# Itu masih backup yang valid; kode >1 berarti backup gagal beneran, jadi pemasangan dibatalin.
+TAROPT=""; tar --version 2>/dev/null | grep -q GNU && TAROPT="--warning=no-file-changed"
+rc=0; tar czf "$BK" $TAROPT --exclude='herdr-app.sock' -C "$HOME" $FILES || rc=$?
+[ "$rc" -le 1 ] || { echo "Backup gagal (tar keluar $rc), pemasangan dibatalin." >&2; exit 1; }
+echo "Backup kondisi lama: $BK"
 
 # 2. layout, tema, mod (mod company-* ditimpa; file lain di konfigurasi kamu gak disentuh)
 mkdir -p "$CFG/layouts" "$CFG/themes" "$CFG/mods"
