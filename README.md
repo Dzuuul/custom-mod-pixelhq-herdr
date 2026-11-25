@@ -198,7 +198,7 @@ Windows (`pixel-hq-task.ps1`, pilihannya gaya PowerShell, boleh disingkat huruf 
 ```powershell
 pixel-hq-task "Perbaiki tes yang gagal"
 pixel-hq-task -Kerjakan -Space api -Model sonnet -Batas 30 -Hentikan "Review PR #12"
-git diff | pixel-hq-task -K -D - "Review perubahan ini"
+git diff | pixel-hq-task -K -Stdin "Review perubahan ini"
 ```
 
 Yang update lewat tombol update (bukan `install.sh`) belum punya perintah `pixel-hq-task` di PATH: jalankan installer

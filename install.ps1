@@ -200,7 +200,9 @@ function Set-TaskCommand {
   $script = Join-Path $Cfg 'mods\company-kanban\pixel-hq-task.ps1'
   $lines = @('@echo off', 'rem pixel-hq-task: dipasang custom Pixel HQ (install.ps1), dicopot uninstall.ps1.', 'setlocal',
     "if not defined HERDR_APP_HOME set `"HERDR_APP_HOME=$Cfg`"",
-    "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$script`" %*", 'exit /b %ERRORLEVEL%')
+    "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$script`" %*", 'set "PIXELHQ_RC=%ERRORLEVEL%"',
+    # kode 5 = powershell.exe -File menolak argumen "-" sendirian (keluar tanpa pesan, sebelum skripnya jalan)
+    'if "%PIXELHQ_RC%"=="5" echo pixel-hq-task: argumen "-" sendirian gak bisa lewat sini. Buat detail dari stdin pakai -Stdin, contoh: git diff ^| pixel-hq-task -Stdin "judul" 1>&2', 'exit /b %PIXELHQ_RC%')
   # cmd.exe membaca file .cmd pakai code page OEM, jadi jalur dengan huruf non-ASCII ditulis pakai itu juga
   $oem = [System.Text.Encoding]::GetEncoding([System.Globalization.CultureInfo]::CurrentCulture.TextInfo.OEMCodePage)
   [System.IO.File]::WriteAllText($shim, ($lines -join "`r`n") + "`r`n", $oem)

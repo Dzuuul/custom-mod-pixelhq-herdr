@@ -2,7 +2,10 @@
 #   pixel-hq-task "Judul task"                                   masuk Antrean
 #   pixel-hq-task -Kerjakan "Judul" -Detail "detail"             langsung Sedang dikerjakan (dikirim ke staf yang nganggur)
 #   pixel-hq-task -Space api -Model sonnet -Effort high -Prioritas tinggi -Batas 30 -Hentikan "Judul"
-#   git diff | pixel-hq-task -Kerjakan -Detail - "Review perubahan ini"   detail dibaca dari stdin
+#   git diff | pixel-hq-task -Kerjakan -Stdin "Review perubahan ini"     detail dibaca dari stdin
+# Bukan "-Detail -" seperti versi Linux: powershell.exe -File (yang dipakai pixel-hq-task.cmd) gak bisa menerima
+# argumen "-" sendirian, prosesnya langsung keluar dengan kode 5 tanpa pesan sebelum skrip ini jalan.
+# Kalau skrip ini dipanggil langsung dari PowerShell, "-Detail -" tetap diterima.
 # Nama pilihan boleh disingkat: -K, -D, -S, -M, -E, -P, -B, -H. Singkatannya alias tetap: tanpa itu -D, -E, dan -P
 # bentrok dengan -Debug, -ErrorAction, dan -PipelineVariable bawaan PowerShell.
 # Sama dengan pixel-hq-task.py: cuma menulis pixel-hq-kanban-inbox.json di folder Herdr; mesin kanban (status bar
@@ -17,12 +20,13 @@ param(
   [Alias('E')][string]$Effort = '',
   [Alias('P')][string]$Prioritas = 'normal',
   [Alias('B')][int]$Batas = 0,
-  [Alias('H')][switch]$Hentikan
+  [Alias('H')][switch]$Hentikan,
+  [switch]$Stdin
 )
 $ErrorActionPreference = 'Stop'
 
 function Show-Usage {
-  Write-Host 'pakai: pixel-hq-task [-Kerjakan] [-Detail TEKS|-] [-Space NAMA] [-Model opus|sonnet|haiku|fable]'
+  Write-Host 'pakai: pixel-hq-task [-Kerjakan] [-Detail TEKS | -Stdin] [-Space NAMA] [-Model opus|sonnet|haiku|fable]'
   Write-Host '                     [-Effort low|medium|high|xhigh|max] [-Prioritas tinggi|normal|rendah]'
   Write-Host '                     [-Batas MENIT [-Hentikan]] "Judul task"'
   Write-Host 'Tanpa -Space: space terminal Herdr tempat perintah ini jalan, kalau bukan di Herdr: space yang lagi dibuka.'
@@ -38,9 +42,9 @@ if ($Effort -and $Effort -notin $Efforts) { Stop-Usage "effort '$Effort' gak dik
 if ($Prioritas -notin @('tinggi', 'normal', 'rendah')) { Stop-Usage "prioritas '$Prioritas' gak dikenal (pilih: tinggi, normal, rendah)" }
 if ($PSBoundParameters.ContainsKey('Batas') -and ($Batas -lt 1 -or $Batas -gt 1440)) { Stop-Usage '-Batas harus 1 sampai 1440 menit' }
 if ($Hentikan -and -not $PSBoundParameters.ContainsKey('Batas')) { Stop-Usage '-Hentikan butuh -Batas' }
-# stdin dibaca sebagai UTF-8 langsung dari aliran mentahnya, sama dengan statusLine dan hook: mengubah
-# [Console]::InputEncoding lalu membaca [Console]::In bikin PowerShell 5.1 keluar diam-diam (kode 5) kalau gak ada konsol
-if ($Detail -eq '-') {
+if ($Stdin -and $Detail -and $Detail -ne '-') { Stop-Usage 'pilih salah satu: -Detail TEKS atau -Stdin' }
+# stdin dibaca sebagai UTF-8 dari aliran mentahnya (gak tergantung code page konsol), sama dengan statusLine dan hook
+if ($Stdin -or $Detail -eq '-') {
   $Detail = [System.IO.StreamReader]::new([Console]::OpenStandardInput(), [System.Text.UTF8Encoding]::new($false)).ReadToEnd()
 }
 

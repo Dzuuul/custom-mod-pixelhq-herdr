@@ -138,23 +138,20 @@ try {
   Check 'hook Stop versi lama tetap menyimpan balasan' ($r.code -eq 0 -and (Test-Path (Join-Path $StateDir 'last\t2.json'))) $r
   Remove-Item Env:HC_TERMINAL_ID
 
-  Write-Host '== PROBE SEMENTARA: argumen - lewat powershell -File'
-  $pa = Join-Path $F 'probe-adv.ps1'; $ps = Join-Path $F 'probe-simple.ps1'
-  [System.IO.File]::WriteAllText($pa, "param([Parameter(Position = 0)][string]`$Judul = '', [string]`$Detail = '')`r`n[Console]::Out.WriteLine(""J=[`$Judul] D=[`$Detail] A=[`$args]"")`r`n", $utf8)
-  [System.IO.File]::WriteAllText($ps, "param([string]`$Judul = '', [string]`$Detail = '')`r`n[Console]::Out.WriteLine(""J=[`$Judul] D=[`$Detail] A=[`$args]"")`r`n", $utf8)
-  foreach ($v in @(@($pa, '-Detail', '-', 'x'), @($pa, '-Detail:-', 'x'), @($pa, '-Detail', 'y', 'x'), @($ps, '-Detail', '-', 'x'), @($pa, 'x', '-'))) {
-    $r = Invoke-Ps $v[0] @($v[1..($v.Count - 1)]) $utf8.GetBytes('abc')
-    Write-Host ("PROBE " + (Split-Path -Leaf $v[0]) + ' ' + ($v[1..($v.Count - 1)] -join ' ') + " => exit $($r.code) out=[$($r.out.Trim())] err=[$($r.err.Trim())]")
-  }
-  $r = Invoke-Tool 'powershell.exe' @('-NoProfile', '-Command', "& '$pa' -Detail - x") $utf8.GetBytes('abc')
-  Write-Host "PROBE -Command & probe -Detail - x => exit $($r.code) out=[$($r.out.Trim())] err=[$($r.err.Trim())]"
   Write-Host '== pixel-hq-task'
   $inbox = Join-Path $Cfg 'pixel-hq-kanban-inbox.json'
   $r = Invoke-Tool $shim @('-Kerjakan', '-Model', 'sonnet', '-Batas', '30', '-Hentikan', 'Tes dari CI')
   Check 'pixel-hq-task lewat pemanggil di WindowsApps' ($r.code -eq 0 -and (Test-Path $inbox)) $r
-  # -D, -E, -P: singkatan yang bentrok dengan -Debug, -ErrorAction, -PipelineVariable kalau gak ada alias
-  $r = Invoke-Tool $shim @('-D', '-', '-E', 'high', '-P', 'tinggi', 'Kedua') $utf8.GetBytes("isi detail $check")
-  Check 'pixel-hq-task dengan detail dari stdin dan singkatan -D -E -P' ($r.code -eq 0) $r
+  # -E, -P: singkatan yang bentrok dengan -ErrorAction, -PipelineVariable kalau gak ada alias
+  $r = Invoke-Tool $shim @('-Stdin', '-E', 'high', '-P', 'tinggi', 'Kedua') $utf8.GetBytes("isi detail $check")
+  Check 'pixel-hq-task -Stdin dan singkatan -E -P' ($r.code -eq 0) $r
+  # "-" sendirian ditolak powershell.exe -File (kode 5 tanpa pesan): kedua pemanggil .cmd menjelaskannya
+  foreach ($cmdFile in @($shim, (Join-Path $Cfg 'mods\company-kanban\pixel-hq-task.cmd'))) {
+    $r = Invoke-Tool $cmdFile @('-D', '-', 'x') $utf8.GetBytes('x')
+    Check ((Split-Path -Leaf (Split-Path -Parent $cmdFile)) + '\pixel-hq-task.cmd: "-D -" dijelaskan, gak gagal diam-diam') ($r.code -eq 5 -and ($r.out + $r.err) -match '-Stdin') $r
+  }
+  $r = Invoke-Tool $shim @('-D', 'teks', '-Stdin', 'x')
+  Check '-Detail TEKS bareng -Stdin ditolak (exit 2)' ($r.code -eq 2) $r
   $raw = [System.IO.File]::ReadAllText($inbox, $utf8)
   $list = @(ConvertFrom-Json -InputObject $raw | ForEach-Object { $_ })
   Check 'dua task masuk inbox, yang pertama gak hilang' ($list.Count -eq 2 -and $list[0].title -eq 'Tes dari CI' -and $list[0].column -eq 'doing' -and $list[0].model -eq 'sonnet' -and $list[0].limitMin -eq 30 -and $list[0].limitStop -eq $true -and $list[1].detail -eq "isi detail $check" -and $list[1].effort -eq 'high' -and $list[1].priority -eq 'tinggi') $raw
