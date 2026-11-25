@@ -1,0 +1,31 @@
+# Tes otomatis tiap push dan pull request: isi repo, JS mod, pasang/copot di Linux, dan semua skrip Windows
+# di Windows PowerShell 5.1 sungguhan (runner Windows GitHub), pakai folder home tiruan.
+name: Tes
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  linux:
+    name: Linux (repo, JS, install.sh)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Pasang gjs
+        run: sudo apt-get update -q && sudo apt-get install -y -q gjs
+      - name: Periksa repo (daftar updater, ASCII, JSON, sintaks)
+        run: python3 tests/check_repo.py
+      - name: Tes JavaScript mod
+        run: sh tests/run-js.sh
+      - name: Tes install.sh, pixel-hq-task, doctor, uninstall.sh
+        run: sh tests/linux-install.sh
+  windows:
+    name: Windows (PowerShell 5.1)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tes install.ps1, statusLine, hook, pixel-hq-task, doctor, uninstall
+        shell: cmd
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File tests\windows.ps1

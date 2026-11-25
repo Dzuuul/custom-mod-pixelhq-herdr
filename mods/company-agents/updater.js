@@ -33,6 +33,8 @@ const PIXEL_HQ_FILES = [
   "mods/company-agents/main.js",
   "mods/company-agents/mod.json",
   "mods/company-agents/names.js",
+  "mods/company-agents/pixel-hq-doctor.ps1",
+  "mods/company-agents/pixel-hq-doctor.py",
   "mods/company-agents/opencode-hp/server.ts",
   "mods/company-agents/opencode-hp/tui.tsx",
   "mods/company-agents/opencode-status.js",

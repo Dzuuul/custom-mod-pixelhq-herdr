@@ -1,5 +1,7 @@
 # custom-mod-pixelhq-herdr
 
+[![Tes](https://github.com/Dzuuul/custom-mod-pixelhq-herdr/actions/workflows/tes.yml/badge.svg)](https://github.com/Dzuuul/custom-mod-pixelhq-herdr/actions/workflows/tes.yml)
+
 Versi custom dari layout **[Pixel HQ](https://github.com/bnhan2710/pixel-hq)** untuk **Herdr**:
 antarmuka berbahasa Indonesia santai, papan kanban yang bisa menyuruh agent kerja, dan pemantau usage Claude Code.
 
@@ -275,6 +277,44 @@ Sama seperti versi Linux, kondisi sekarang di-backup dulu ke `%USERPROFILE%\back
 
 Kembali ke Pixel HQ asli: `sh uninstall.sh`, lalu pasang dari <https://github.com/bnhan2710/pixel-hq>.
 
+## Kalau ada yang gak jalan: doctor
+
+```sh
+sh doctor.sh                 # Linux/macOS, dari folder repo
+```
+
+Windows: klik dua kali `doctor.cmd` di folder repo. Tanpa folder repo, jalankan salinan yang terpasang:
+`python3 ~/.config/herdr-app/mods/company-agents/pixel-hq-doctor.py` atau
+`powershell -NoProfile -ExecutionPolicy Bypass -File "%USERPROFILE%\.config\herdr-app\mods\company-agents\pixel-hq-doctor.ps1"`.
+
+Doctor gak mengubah apa pun. Yang dicek:
+- versi yang terpasang, dan apakah semua file Pixel HQ ada,
+- error yang dilaporkan Herdr dan layout yang lagi aktif,
+- hotkey, statusLine, dan hook Claude Code,
+- data usage, kanban, dan inbox `pixel-hq-task`,
+- di Windows: distro WSL yang lagi jalan, tanpa menyalakan yang mati.
+
+Tiap temuan ditandai `ok`, `info`, `AWAS`, atau `MASALAH`, dengan saran perbaikannya. Laporan disimpan ke
+`~/pixel-hq-doctor-<waktu>.txt` (di Windows juga disalin ke clipboard), buat ditempel waktu lapor masalah. Isinya gak
+memuat judul task, balasan agent, atau isi `settings.json` selain bagian Pixel HQ, dan folder home ditulis `~`.
+
+## Tes
+
+Tiap push dan pull request menjalankan [GitHub Actions](.github/workflows/tes.yml):
+
+- **Linux**:
+  - pemeriksaan repo (`tests/check_repo.py`): daftar file updater cocok dengan isi repo, skrip Windows ASCII,
+    JSON valid, `state.js` kedua mod sama,
+  - tes JavaScript mod di gjs (`tests/run-js.sh`): mesin kanban, baca state dari WSL, dialog kanban, updater,
+  - pasang dan copot di home tiruan (`tests/linux-install.sh`): install, statusLine, hook Stop, `pixel-hq-task`,
+    doctor, `--restore`, `--purge`.
+- **Windows** (Windows PowerShell 5.1 di runner Windows GitHub, `tests/windows.ps1`):
+  - sintaks, ASCII, dan CRLF semua `.ps1`/`.cmd`,
+  - lalu alur yang sama dengan Linux, termasuk `pixel-hq-task` lewat PATH dan `uninstall.cmd`.
+
+Semuanya bisa dijalankan sendiri dengan perintah di atas (tes JS butuh `gjs`). Tes gak menyentuh Herdr dan Claude Code
+yang terpasang: semuanya pakai folder home sementara yang dihapus setelahnya.
+
 ## Susunan repo
 
 ```
@@ -285,6 +325,8 @@ mods/company-usage/       dialog usage Claude (riwayat dan per staf)
 install.sh / uninstall.sh pasang, copot, pulihkan (Linux/macOS)
 install.cmd, install.ps1  pemasang Windows
 uninstall.cmd, .ps1       copot dan pulihkan di Windows
+doctor.sh, doctor.cmd     diagnosa pemasangan (mods/company-agents/pixel-hq-doctor.*)
+tests/                    tes otomatis (lihat bagian Tes)
 docs/                     gambar README
 ```
 
