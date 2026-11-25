@@ -60,6 +60,17 @@ function Each-Line([string]$path, [scriptblock]$fn) {
   $r = [System.IO.StreamReader]::new([System.IO.File]::Open($path, 'Open', 'Read', 'ReadWrite, Delete'), $utf8)
   try { while ($null -ne ($line = $r.ReadLine())) { & $fn $line } } finally { $r.Dispose() }
 }
+function Write-TextAtomic([string]$dst, [string]$text) {
+  $tmp = "$dst.tmp.$PID"
+  [System.IO.File]::WriteAllText($tmp, $text, $utf8)
+  try {
+    if (-not [System.IO.File]::Exists($dst)) { [System.IO.File]::Move($tmp, $dst) }
+    else {
+      try { [System.IO.File]::Replace($tmp, $dst, [NullString]::Value) }  # atomic on NTFS
+      catch { [System.IO.File]::Delete($dst); [System.IO.File]::Move($tmp, $dst) }  # where ReplaceFile is not supported
+    }
+  } catch { try { [System.IO.File]::Delete($tmp) } catch {} }
+}
 function Quote-Arg([string]$a) {
   if ($a -eq '') { return '""' }
   if ($a -notmatch '[\s"]') { return $a }
@@ -90,6 +101,8 @@ $model = ''
 $pct = ''
 $quota = ''
 $effort = ''
+$cost = ''
+$tokens = ''
 try {
   $m = P $d 'model'
   if (IsObj $m) { $model = Clean (First (P $m 'display_name') (P $m 'name') (P $m 'id') (P $m 'title')) }
@@ -177,16 +190,44 @@ try {
       [void][System.IO.Directory]::CreateDirectory($ud)
       $at = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
       $o = '{"at": ' + $at + ', "session": {"used": ' + (J $fiveUsed) + ', "resets": ' + (J (P $five 'resets_at')) + '}, "week": {"used": ' + (J $sevUsed) + ', "resets": ' + (J (P $sev 'resets_at')) + '}}'
-      $dst = [System.IO.Path]::Combine($ud, 'claude-usage.json')
-      $tmp = "$dst.tmp.$PID"
-      [System.IO.File]::WriteAllText($tmp, $o, $utf8)
+      Write-TextAtomic ([System.IO.Path]::Combine($ud, 'claude-usage.json')) $o
+      # History for the chart in the usage dialog: [time, session %, week %], at most every 5 minutes
+      # (or when the numbers change), kept for 14 days.
       try {
-        if (-not [System.IO.File]::Exists($dst)) { [System.IO.File]::Move($tmp, $dst) }
-        else {
-          try { [System.IO.File]::Replace($tmp, $dst, [NullString]::Value) }  # atomic on NTFS
-          catch { [System.IO.File]::Delete($dst); [System.IO.File]::Move($tmp, $dst) }  # where ReplaceFile is not supported
+        $hp = [System.IO.Path]::Combine($ud, 'claude-usage-history.json')
+        $rows = New-Object System.Collections.ArrayList
+        try {
+          if ([System.IO.File]::Exists($hp)) {
+            $old = Parse-Json ([System.IO.File]::ReadAllText($hp, $utf8))
+            foreach ($r in @($old)) {
+              $r = @($r)
+              if ($r.Count -eq 3 -and (IsNum $r[0]) -and ($at - $r[0] -lt 14 * 86400)) { [void]$rows.Add($r) }
+            }
+          }
+        } catch { $rows.Clear() }
+        $row = @($at, $fiveUsed, $sevUsed)
+        $lastRow = if ($rows.Count) { $rows[$rows.Count - 1] } else { $null }
+        $changed = $true
+        if ($lastRow) { $changed = ((J $lastRow[1]) -ne (J $fiveUsed)) -or ((J $lastRow[2]) -ne (J $sevUsed)) }
+        if (-not $lastRow -or ($at - $lastRow[0]) -ge 300 -or $changed) {
+          if ($lastRow -and ($at - $lastRow[0]) -lt 60) { $rows[$rows.Count - 1] = $row } else { [void]$rows.Add($row) }
+          $hj = '[' + (@(foreach ($r in $rows) { '[' + (J $r[0]) + ',' + (J $r[1]) + ',' + (J $r[2]) + ']' }) -join ',') + ']'
+          Write-TextAtomic $hp $hj
         }
-      } catch { try { [System.IO.File]::Delete($tmp) } catch {} }
+      } catch {}
+    }
+  } catch {}
+
+  # Session cost and tokens, for the per-staff table in the usage dialog
+  try {
+    $cs = P $d 'cost'
+    $tc = P $cs 'total_cost_usd'
+    if (IsNum $tc) { $cost = ([double]$tc).ToString('0.0000', $inv) }
+    $ti = P $c 'total_input_tokens'
+    $to = P $c 'total_output_tokens'
+    if ((IsNum $ti) -or (IsNum $to)) {
+      $sum = $(if (IsNum $ti) { [double]$ti } else { 0 }) + $(if (IsNum $to) { [double]$to } else { 0 })
+      $tokens = [string][long][math]::Truncate($sum)
     }
   } catch {}
 } catch {}
@@ -201,6 +242,8 @@ if ($term) {
         $v = switch ($k) { 'context' { $pct } 'model' { $model } 'quota' { $quota } 'effort' { $effort } }
         foreach ($ns in 'agent', 'claude', 'agy') { $argv += "$ns.$k=$v" }
       }
+      $argv += "agent.cost=$cost"
+      $argv += "agent.tokens=$tokens"
       # like `hc ... >/dev/null 2>&1`, but waits the few ms hc takes (at most 3 s): sharing this console
       # (no CreateNoWindow) avoids starting a new hidden console, which would cost far more than the wait
       $psi = [System.Diagnostics.ProcessStartInfo]::new($hc, ((@($argv) | ForEach-Object { Quote-Arg $_ }) -join ' '))

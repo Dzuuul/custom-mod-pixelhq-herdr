@@ -6,7 +6,9 @@
 #   agent.threads       sub-agents running
 #
 # Usage (from Claude Code hooks, JSON on stdin):
-#   claude-activity.ps1 job-start | job-end | sub-start | sub-end | turn-end | reset
+#   claude-activity.ps1 job-start | job-end | sub-start | sub-end | turn-end | stop | reset
+# "stop" is turn-end plus: the agent's last reply goes to ~/.local/state/pixel-hq/last/<terminal>.json
+# ({"at": epoch seconds, "text": ...}), which the Pixel HQ kanban shows on the finished task's card.
 # Does nothing outside a Herdr terminal (no HC_TERMINAL_ID) and never fails the hook.
 # Starting PowerShell takes a few hundred ms, so the hooks that run around every command, sub-agent and turn are
 # installed with "async": Claude Code does not wait for them. Their events may then arrive out of order, so an id
@@ -34,7 +36,7 @@ $HookSpecs = @(  # (event, matcher, action, async); Claude Code on Windows runs 
   @('SubagentStart', $null, 'sub-start', $true),
   @('SubagentStop', $null, 'sub-end', $true),
   @('UserPromptSubmit', $null, 'turn-end', $true),
-  @('Stop', $null, 'turn-end', $true),
+  @('Stop', $null, 'stop', $true),
   @('SessionStart', '^(startup|resume|clear)$', 'reset', $false),
   @('SessionEnd', $null, 'reset', $false)
 )
@@ -139,6 +141,42 @@ function Run-Hc([string]$hc, [string[]]$argv) {
   [void][System.Diagnostics.Process]::Start($psi).WaitForExit(3000)
 }
 
+function Last-Reply($payload) {
+  # the agent's last reply: from the hook payload when Claude Code sends it, else from the transcript tail
+  $t = P $payload 'last_assistant_message'
+  if ($t -is [string] -and $t.Trim()) { return $t.Trim() }
+  $path = P $payload 'transcript_path'
+  if ($path -isnot [string] -or -not [System.IO.File]::Exists($path)) { return '' }
+  $fs = [System.IO.File]::Open($path, 'Open', 'Read', 'ReadWrite, Delete')
+  try {
+    $start = [math]::Max(0L, $fs.Length - 2000000)  # only the tail: transcripts grow large
+    [void]$fs.Seek($start, 'Begin')
+    $text = [System.IO.StreamReader]::new($fs, $utf8).ReadToEnd()
+  } finally { $fs.Dispose() }
+  $lines = $text -split "`n"
+  $from = if ($start -gt 0) { 1 } else { 0 }  # the first line of a tail may be cut
+  for ($i = $lines.Length - 1; $i -ge $from; $i--) {
+    $line = $lines[$i]
+    if ($line -notmatch '"role"\s*:\s*"assistant"') { continue }
+    try {
+      $content = P (P (Parse-Json $line) 'message') 'content'
+      if ($content -is [string]) { $parts = @($content) }
+      else { $parts = @(foreach ($c in @($content)) { if ((IsObj $c) -and (P $c 'type') -eq 'text') { [string](P $c 'text') } }) }
+      $joined = (@($parts | Where-Object { $_ }) -join "`n").Trim()
+      if ($joined) { return $joined }
+    } catch {}
+  }
+  return ''
+}
+function Save-Reply([string]$term, $payload) {
+  $text = Last-Reply $payload
+  if (-not $text) { return }
+  if ($text.Length -gt 4000) { $text = $text.Substring($text.Length - 4000) }
+  $folder = [System.IO.Path]::Combine($env:USERPROFILE, '.local', 'state', 'pixel-hq', 'last')
+  [void][System.IO.Directory]::CreateDirectory($folder)
+  Write-TextAtomic ([System.IO.Path]::Combine($folder, "$term.json")) ('{"at": ' + [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() + ', "text": ' + (Format-JsonString $text) + '}')
+}
+
 function Setup([bool]$remove) {
   $path = Join-Path $env:USERPROFILE '.claude\settings.json'
   $cfg = [pscustomobject]@{}
@@ -209,6 +247,11 @@ function Report {
     $raw = [System.IO.StreamReader]::new([Console]::OpenStandardInput(), $utf8).ReadToEnd()
     if ($raw.Trim()) { $payload = Parse-Json $raw }
   } catch {}
+  $act = $Action
+  if ($act -eq 'stop') {
+    try { Save-Reply $term $payload } catch {}
+    $act = 'turn-end'
+  }
   $hc = Find-Hc
   if (-not $hc) { return }
 
@@ -237,7 +280,7 @@ function Report {
 
     $toolId = [string](P $payload 'tool_use_id')
     $agentId = [string](P $payload 'agent_id')
-    switch ($Action) {
+    switch ($act) {
       'job-start' { if ($toolId -and -not $ended.ContainsKey($toolId)) { $jobs[$toolId] = $now } }
       'job-end' { if ($toolId) { [void]$jobs.Remove($toolId); $ended[$toolId] = $now } }
       'sub-start' {
