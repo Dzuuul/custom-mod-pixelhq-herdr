@@ -84,10 +84,11 @@ try {
   # pemegang sebelumnya mati tanpa melepas kunci (AbandonedMutexException) = kuncinya tetap jadi milik kita
   try { $held = $lock.WaitOne(10000) } catch { $held = ($_.Exception -is [System.Threading.AbandonedMutexException]) -or ($_.Exception.InnerException -is [System.Threading.AbandonedMutexException]) }
   if (-not $held) { Write-Host 'Inbox kanban lagi dipakai perintah lain, coba lagi.' -ForegroundColor Red; exit 1 }
-  # @(...) biar daftar 1 isi tetap daftar, di PowerShell 5.1 maupun 7 (ConvertFrom-Json-nya beda soal ini)
+  # PowerShell 5.1 mengeluarkan array JSON sebagai SATU objek, jadi @(ConvertFrom-Json ...) berisi satu array dan
+  # semua task yang belum diambil ikut terbuang. Lewat pipe ke ForEach-Object isinya dibuka, di 5.1 maupun 7.
   $raw = Read-Text $inbox
   $list = [System.Collections.ArrayList]::new()
-  if ($raw.TrimStart().StartsWith('[')) { try { foreach ($e in @(ConvertFrom-Json -InputObject $raw)) { [void]$list.Add($e) } } catch {} }
+  if ($raw.TrimStart().StartsWith('[')) { try { foreach ($e in @(ConvertFrom-Json -InputObject $raw | ForEach-Object { $_ })) { [void]$list.Add($e) } } catch {} }
   # buang yang udah diambil Herdr (tercatat di papan) dan yang udah seminggu gak diambil
   $taken = [System.Collections.Generic.HashSet[string]]::new()
   $board = $null
