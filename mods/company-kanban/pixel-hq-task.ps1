@@ -3,20 +3,21 @@
 #   pixel-hq-task -Kerjakan "Judul" -Detail "detail"             langsung Sedang dikerjakan (dikirim ke staf yang nganggur)
 #   pixel-hq-task -Space api -Model sonnet -Effort high -Prioritas tinggi -Batas 30 -Hentikan "Judul"
 #   git diff | pixel-hq-task -Kerjakan -Detail - "Review perubahan ini"   detail dibaca dari stdin
-# Nama pilihan boleh disingkat: -K, -D, -S, -M, -E, -P, -B, -H.
+# Nama pilihan boleh disingkat: -K, -D, -S, -M, -E, -P, -B, -H. Singkatannya alias tetap: tanpa itu -D, -E, dan -P
+# bentrok dengan -Debug, -ErrorAction, dan -PipelineVariable bawaan PowerShell.
 # Sama dengan pixel-hq-task.py: cuma menulis pixel-hq-kanban-inbox.json di folder Herdr; mesin kanban (status bar
 # Pixel HQ) mengambilnya dalam beberapa detik, atau waktu Herdr dibuka lagi. Papan kanban sendiri gak disentuh.
 # File ini sengaja ASCII saja: Windows PowerShell 5.1 membaca skrip tanpa BOM sebagai ANSI.
 param(
   [Parameter(Position = 0)][string]$Judul = '',
-  [string]$Detail = '',
-  [string]$Space = '',
-  [switch]$Kerjakan,
-  [string]$Model = '',
-  [string]$Effort = '',
-  [string]$Prioritas = 'normal',
-  [int]$Batas = 0,
-  [switch]$Hentikan
+  [Alias('D')][string]$Detail = '',
+  [Alias('S')][string]$Space = '',
+  [Alias('K')][switch]$Kerjakan,
+  [Alias('M')][string]$Model = '',
+  [Alias('E')][string]$Effort = '',
+  [Alias('P')][string]$Prioritas = 'normal',
+  [Alias('B')][int]$Batas = 0,
+  [Alias('H')][switch]$Hentikan
 )
 $ErrorActionPreference = 'Stop'
 
@@ -102,7 +103,13 @@ try {
   $json = ConvertTo-Json -InputObject $keep.ToArray() -Depth 6
   $tmp = "$inbox.tmp.$PID"
   [System.IO.File]::WriteAllText($tmp, $json + "`n", $utf8)
-  if (Test-Path -LiteralPath $inbox -PathType Leaf) { [System.IO.File]::Replace($tmp, $inbox, $null) } else { [System.IO.File]::Move($tmp, $inbox) }
+  # [NullString]::Value, bukan $null: PowerShell mengubah $null jadi "" dan File.Replace menolak jalur kosong
+  try {
+    if (Test-Path -LiteralPath $inbox -PathType Leaf) { [System.IO.File]::Replace($tmp, $inbox, [NullString]::Value) } else { [System.IO.File]::Move($tmp, $inbox) }
+  } catch {
+    Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+    throw
+  }
 } finally {
   if ($held) { $lock.ReleaseMutex() }
   $lock.Dispose()
