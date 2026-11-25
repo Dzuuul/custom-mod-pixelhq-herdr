@@ -1,1 +1,1 @@
-{"version":"1.8.4","type":"normal","notes":"Fixed Claude Code & Antigravity statusLine setup, improved zoom stability for figure shake/wiggle and the Spaces train car, and fixed the pixel toast integration."}
+{"version":"2.1.0","type":"normal","notes":"Versi custom: bahasa Indonesia penuh, kanban lebih lengkap, peringatan dan riwayat usage Claude, updater dari repo sendiri, nama staf acak yang unik.","base":"pixel-hq 1.8.4"}

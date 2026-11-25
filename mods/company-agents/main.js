@@ -9,6 +9,7 @@ import { agentOf, speciesOf, duckWidth, duckMood, mood, DUCK_CENTER, IDLE_SNOOZE
 import { scene, sceneLayout, yHorizon } from "./scene.js";
 import { Editor } from "./editor.js";
 import { checkPixelHqUpdate, executePixelHqUpdate } from "./updater.js";
+import { assignNames } from "./names.js";
 import { snapshot, clashes, hire, agentTaskArgv } from "./crew.js";
 
 // The figure editor, as a dialog; `space` opens it on that space's pick.
@@ -337,6 +338,29 @@ export default class Agents extends View {
     });
     loadNames(cx);
     cx.timer.every(3000, loadNames);
+    // Tiap terminal baru (staf baru / sesi baru) dikasih nama acak yang belum dipakai staf lain (lihat names.js).
+    this.missingPanes = new Map();
+    const assign = (cx) => cx.spawn(async (cx) => {
+      if (this.assigning) return;
+      this.assigning = true;
+      try {
+        const ids = panes().filter((p) => p.terminal).map((p) => p.pane);
+        if (!ids.length) return;
+        const raw = await readTextFile(namesFile).catch(() => null);
+        let cur = {};
+        try { cur = JSON.parse(raw ?? "{}"); } catch { return; }
+        if (!cur || typeof cur !== "object" || Array.isArray(cur)) return;
+        const r = assignNames(cur, ids, Date.now(), this.missingPanes);
+        if (!r.changed) return;
+        const text = JSON.stringify(r.names, null, 2);
+        await writeTextFile(namesFile, text, raw);
+        this.namesRaw = text;
+        setShared("pixel-hq.names", r.names);
+        cx.notify();
+      } catch {} finally { this.assigning = false; }
+    });
+    cx.timer.after(1500, assign);
+    cx.timer.every(3000, assign);
     this.folded = new Set();
     // Where the person dragged each pet: fractions of the panel, kept across restarts.
     try { this.petpos = JSON.parse(localStorage.getItem("petpos") ?? "{}"); } catch { this.petpos = {}; }
@@ -620,6 +644,8 @@ export default class Agents extends View {
     const tabCounts = new Map();
     for (const a of waiting) tabCounts.set(a.tab, (tabCounts.get(a.tab) ?? 0) + 1);
     const nameOf = (a) => {
+      const own = (shared("pixel-hq.names") ?? {})[a.pane]?.name;
+      if (own) return own;
       const tab = tabs.get(a.tab);
       const many = (tabCounts.get(a.tab) ?? 0) > 1;
       const label = tab ? title(many ? { ...tab, named: false } : tab, many ? a : leads.get(a.tab)) : (clean(a.title) || a.program?.name || a.tab_name || a.address);
@@ -1783,10 +1809,11 @@ export default class Agents extends View {
       } else localStorage.setItem("petpos", JSON.stringify(this.petpos));
       cx.notify();
     };
-    const ROLES = (a) => ((shared("pixel-hq.names") ?? {})[a.pane]?.role ?? agentOf(a.program?.key)?.role ?? "").toLowerCase();
-    const STATE = { working: "typing working busy", idle: "idle break coffee snooze urge sleeping", done: "shipped done finished", blocked: "needs you blocked waiting" };
+    const ROLES = (a) => `${(shared("pixel-hq.names") ?? {})[a.pane]?.role ?? agentOf(a.program?.key)?.role ?? ""} ${agentOf(a.program?.key)?.roleEn ?? ""}`.toLowerCase();
+    // kata kunci dua bahasa: yang Inggris tetap jalan, yang Indonesia ditambah
+    const STATE = { working: "typing working busy ngetik kerja sibuk", idle: "idle break coffee snooze urge sleeping santai ngopi tidur nganggur", done: "shipped done finished kelar selesai beres", blocked: "needs you blocked waiting nunggu tunggu" };
     const q = this.query.trim().toLowerCase();
-    const hitOf = (a) => !q || q.split(/\s+/).every((w) => [detail.get(a.address), a.space_name, label(a), a.program?.name, ROLES(a), STATE[a.status]].join(" ").toLowerCase().includes(w));
+    const hitOf = (a) => !q || q.split(/\s+/).every((w) => [detail.get(a.address), a.space_name, label(a), (shared("pixel-hq.names") ?? {})[a.pane]?.name, a.program?.name, ROLES(a), STATE[a.status]].join(" ").toLowerCase().includes(w));
     const hits = list.filter(hitOf);
     this.firstHit = q ? hits[0]?.pane ?? null : null;
     const breakers = list.filter((x) => x.status === "idle" && !x.focused && this.waitOf(x.address, x.status, now) < IDLE_SNOOZE).map((x) => x.address);
@@ -2066,7 +2093,7 @@ export default class Agents extends View {
       })
       .when(list.length === 0 && settledFloor === 0, (el) => el.child(div().absolute().left(12).top(sz.height * 0.5).w(sz.width - 24).px(8).py(6).bg("#0f111acc").border_1().border_color("#313244").text_size(12).text_color("#ffffff").child("Belum ada staf di lantai ini. Rekrut pakai tombol + di atas, atau jalanin agent di space ini.")))
       .when(list.length === 0 && settledFloor > 0, (el) => el.child(div().absolute().left(12).top(sz.height * 0.5).w(sz.width - 24).px(8).py(6).bg("#0f111acc").border_1().border_color("#313244").text_size(12).text_color("#a6e3a1").child("Semua yang kelar udah pulang. Klik chip ✓ di pojok buat manggil balik.")))
-      .when(hidden > 0, (el) => el.child(div().absolute().right(8).top(horizon + 6).px(8).py(3).bg("#11111bdd").border_1().border_color("#45475a").text_size(11).text_color("#cdd6f4").child(`+${hidden} more · narrow the panel to list all`)))
+      .when(hidden > 0, (el) => el.child(div().absolute().right(8).top(horizon + 6).px(8).py(3).bg("#11111bdd").border_1().border_color("#45475a").text_size(11).text_color("#cdd6f4").child(`+${hidden} lagi · sempitkan panel buat lihat semua`)))
       .children(links)
       .children(this.drag?.moved ? [...pets.filter((_, i) => seated[i].address !== this.drag.addr), ...pets.filter((_, i) => seated[i].address === this.drag.addr)] : pets)
       .when(Boolean(this.notice), (el) => {
@@ -2107,12 +2134,12 @@ export default class Agents extends View {
                 .child(div().min_w(0).truncate().font_family(mono).font_bold().text_size(10).text_color("#89b4fa").child("LANTAI ENGINEER")))
               .child(h_flex().gap(10).items_center().flex_none()
                 .when(blockedAll.length > 0, (el) => el.child(div().id("ag-needs-you").relative().w(14).h(14).flex_none().cursor_pointer()
-                  .tooltip(`${blockedAll.length} ${blockedAll.length === 1 ? "agent needs" : "agents need"} you · open the list`)
+                  .tooltip(`${blockedAll.length} agent nunggu kamu · buka daftarnya`)
                   .on_click(() => this.openNeedsYou())
                   .children([[6, 0, 2, 1], [4, 1, 6, 1], [3, 2, 8, 1], [2, 3, 10, 7], [1, 10, 12, 2], [0, 12, 14, 1], [5, 13, 4, 1], [6, 14, 2, 1]].map(([x, y, w, h]) => div().absolute().left(x).top(y).w(w).h(h).bg("#f9e2af")))
                   .child(div().absolute().right(-5).top(-5).min_w(10).h(10).px(2).border_1().border_color("#11111b").bg("#f38ba8").flex().items_center().justify_center().text_size(7.5).font_bold().text_color("#11111b").child(String(blockedAll.length)))))
                 .when(Boolean(this.fileError), (el) => el.child(div().id("ag-file-error").text_size(11).font_bold().text_color(t.blocked)
-                  .tooltip(`${this.fileError}. Using the last good figures.`).child("!")))
+                  .tooltip(`${this.fileError}. Pakai figur terakhir yang masih bener.`).child("!")))
                 .child(div().id("ag-hire").relative().w(14).h(14).flex_none().cursor_pointer()
                   .tooltip("Rekrut staf: agent baru di git worktree sendiri")
                   .on_click((_e, cx) => this.openHire(cx))
@@ -2122,7 +2149,7 @@ export default class Agents extends View {
                   .text_color(t.dim)
                   .hover((s) => s.text_color(t.foreground))
                   .on_click(() => openFigures(focused()?.space ? spaces().find((s) => s.id === focused().space)?.name : null))
-                  .tooltip("Pond figures: how agents look, per space")
+                  .tooltip("Figur kolam: tampilan agent, per space")
                   .child(svg("mods/company-agents/duck-icon.svg").size(14)))
                 .child(
                   div()
@@ -2131,7 +2158,7 @@ export default class Agents extends View {
                     .text_color(t.dim)
                     .hover((s) => s.text_color(t.foreground))
                     .on_click(() => openOverlay({ mod: "company-agents", kind: "popup", frame: "none", width: 200, height: 140, props: { sortMenu: true } }))
-                    .tooltip(`Sort agents: ${sort.label}`)
+                    .tooltip(`Urutkan agent: ${sort.label}`)
                     .child(svg(`mods/company-agents/${sort.icon}.svg`).size(14)),
                 ))),
         )),

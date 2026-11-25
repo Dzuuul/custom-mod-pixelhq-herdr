@@ -9,7 +9,9 @@ runners and LEDs for shell commands and interns for sub-agents:
   agent.threads       sub-agents running
 
 Usage (from Claude Code hooks, JSON on stdin):
-  claude-activity.py job-start | job-end | sub-start | sub-end | turn-end | reset
+  claude-activity.py job-start | job-end | sub-start | sub-end | turn-end | stop | reset
+"stop" is turn-end plus: the agent's last reply goes to ~/.local/state/pixel-hq/last/<terminal>.json
+({"at": epoch seconds, "text": ...}), which the Pixel HQ kanban shows on the finished task's card.
 Does nothing outside a Herdr terminal (no HC_TERMINAL_ID) and never fails the hook.
 
 Setup (merges into ~/.claude/settings.json, keeps your other hooks, backs it up first):
@@ -36,7 +38,7 @@ HOOKS = [  # (event, matcher, action)
     ("SubagentStart", None, "sub-start"),
     ("SubagentStop", None, "sub-end"),
     ("UserPromptSubmit", None, "turn-end"),
-    ("Stop", None, "turn-end"),
+    ("Stop", None, "stop"),
     ("SessionStart", "^(startup|resume|clear)$", "reset"),
     ("SessionEnd", None, "reset"),
 ]
@@ -77,6 +79,53 @@ def setup(remove: bool) -> None:
     print(("Removed" if remove else "Installed") + f" Pixel HQ hooks in {path} (backup: {path}.pixel-hq.bak)")
 
 
+def last_reply(payload: dict) -> str:
+    """The agent's last reply: from the hook payload when Claude Code sends it, else from the transcript."""
+    text = payload.get("last_assistant_message")
+    if isinstance(text, str) and text.strip():
+        return text.strip()
+    path = payload.get("transcript_path")
+    if not isinstance(path, str) or not os.path.isfile(path):
+        return ""
+    last = ""
+    try:
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            fh.seek(max(0, os.path.getsize(path) - 2_000_000))  # only the tail: transcripts grow large
+            for line in fh:
+                try:
+                    ev = json.loads(line)
+                except Exception:
+                    continue
+                msg = ev.get("message") if isinstance(ev, dict) else None
+                if not isinstance(msg, dict) or msg.get("role") != "assistant":
+                    continue
+                content = msg.get("content")
+                if isinstance(content, str):
+                    parts = [content]
+                elif isinstance(content, list):
+                    parts = [c.get("text", "") for c in content if isinstance(c, dict) and c.get("type") == "text"]
+                else:
+                    parts = []
+                joined = "\n".join(p for p in parts if p).strip()
+                if joined:
+                    last = joined
+    except Exception:
+        return ""
+    return last
+
+
+def save_reply(term: str, payload: dict) -> None:
+    text = last_reply(payload)
+    if not text:
+        return
+    folder = os.path.expanduser("~/.local/state/pixel-hq/last")
+    os.makedirs(folder, exist_ok=True)
+    tmp = os.path.join(folder, f"{term}.json.tmp")
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump({"at": int(time.time()), "text": text[-4000:]}, fh, ensure_ascii=False)
+    os.replace(tmp, os.path.join(folder, f"{term}.json"))
+
+
 def main() -> None:
     action = sys.argv[1] if len(sys.argv) > 1 else ""
     if action in ("install", "uninstall"):
@@ -88,6 +137,12 @@ def main() -> None:
         payload = json.load(sys.stdin)
     except Exception:
         payload = {}
+    if action == "stop":
+        try:
+            save_reply(term, payload if isinstance(payload, dict) else {})
+        except Exception:
+            pass
+        action = "turn-end"
     hc = shutil.which("hc") or os.path.expanduser("~/.local/bin/hc")
     if not os.path.exists(hc):
         return

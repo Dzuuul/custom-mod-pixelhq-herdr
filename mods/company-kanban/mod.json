@@ -2,5 +2,5 @@
   "place": "none",
   "title": "Kanban",
   "overlay": { "kind": "dialog", "frame": "none", "width": 1000, "height": 640 },
-  "palette": [{ "title": "Papan kanban", "command": "mod.open", "args": { "name": "company-kanban" }, "words": "task kanban tugas board" }]
+  "palette": [{ "title": "Papan kanban", "command": "mod.open", "args": { "name": "company-kanban" }, "words": "task kanban tugas board papan antrean kerjaan todo" }]
 }

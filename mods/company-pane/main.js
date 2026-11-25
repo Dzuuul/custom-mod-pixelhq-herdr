@@ -2,6 +2,7 @@ import { View, div, svg, image } from "gpui-kit";
 import { h_flex, InputState, Input } from "gpui-base";
 import { panes, props, run, theme, home, layout, shared, setShared, appHome, readTextFile, writeTextFile } from "herdr";
 import { agentOf, duckMood, duckWidth, mood } from "./duck.js";
+import { uniqueName } from "./names.js";
 
 const MONO = "JetBrains Mono";
 
@@ -24,7 +25,7 @@ const bang = (c) => div().relative().flex_none().w(4).h(10)
 const tick = (c) => div().relative().flex_none().w(10).h(10)
   .children([[0, 6], [2, 8], [4, 6], [6, 4], [8, 2]].map(([x, y]) => div().absolute().left(x).top(y - 2).w(2).h(4).bg(c)));
 
-const ROLE = (p) => agentOf(p.program?.key)?.role ?? (p.program?.shell ? "Terminal" : (p.program?.name ?? "Freelancer"));
+const ROLE = (p) => agentOf(p.program?.key)?.role ?? (p.program?.shell ? "Terminal" : (p.program?.name ?? "Pekerja Lepas"));
 
 function paneFrame(node) {
   if (!node || node.hidden) return null;
@@ -77,8 +78,9 @@ export default class CompanyPane extends View {
   commit(cx) {
     const e = this.editing;
     if (!e) return;
-    const v = this.input.value().trim().slice(0, 40);
+    let v = this.input.value().trim().slice(0, 40);
     const names = { ...(shared("pixel-hq.names") ?? {}) };
+    if (v && e.field === "name") v = uniqueName(names, e.pane, v);
     const mine = { ...(names[e.pane] ?? {}) };
     if (v) mine[e.field] = v; else delete mine[e.field];
     if (Object.keys(mine).length) names[e.pane] = mine; else delete names[e.pane];

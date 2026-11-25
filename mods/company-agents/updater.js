@@ -1,5 +1,11 @@
 import { appHome, readTextFile, writeTextFile, shared, setShared, notify } from "herdr";
 
+// Versi custom: update diambil dari repo ini sendiri, bukan dari Pixel HQ asli (bnhan2710/pixel-hq),
+// supaya tombol "Update" gak menimpa perubahan lokal (bahasa Indonesia, kanban, usage Claude).
+const REPO = "Dzuuul/custom-mod-pixelhq-herdr";
+// File yang gak perlu diunduh: tipe editor (besar), konfigurasi editor, dan MusicBox yang sengaja dihapus.
+const SKIP = (p) => p.endsWith(".d.ts") || p.endsWith("jsconfig.json") || p.includes("company-music/") || p.endsWith(".png") || p.endsWith("README.md");
+
 const PIXEL_HQ_FILES = [
   "layouts/pixel-hq.json",
   "themes/pixel-hq.json",
@@ -39,6 +45,7 @@ const PIXEL_HQ_FILES = [
   "mods/company-agents/duck.js",
   "mods/company-agents/editor.js",
   "mods/company-agents/figures.js",
+  "mods/company-agents/names.js",
   "mods/company-agents/opencode-status.js",
   "mods/company-agents/scene.js",
   "mods/company-agents/sparkles.svg",
@@ -72,21 +79,21 @@ export async function checkPixelHqUpdate(notifyUser = true) {
 
     let latest = null;
     try {
-      const commitRes = await fetch("https://api.github.com/repos/bnhan2710/pixel-hq/commits/main", {
+      const commitRes = await fetch(`https://api.github.com/repos/${REPO}/commits/main`, {
         headers: { "User-Agent": "Pixel-HQ-Updater" },
       }).catch(() => null);
       if (commitRes && commitRes.ok) {
         const commitData = await commitRes.json().catch(() => null);
         const sha = commitData?.sha;
         if (sha) {
-          const rawShaRes = await fetch(`https://raw.githubusercontent.com/bnhan2710/pixel-hq/${sha}/mods/company-agents/version.json`);
+          const rawShaRes = await fetch(`https://raw.githubusercontent.com/${REPO}/${sha}/mods/company-agents/version.json`);
           if (rawShaRes.ok) latest = await rawShaRes.json().catch(() => null);
         }
       }
     } catch {}
 
     if (!latest?.version) {
-      const res = await fetch(`https://raw.githubusercontent.com/bnhan2710/pixel-hq/main/mods/company-agents/version.json?t=${Date.now()}`);
+      const res = await fetch(`https://raw.githubusercontent.com/${REPO}/main/mods/company-agents/version.json?t=${Date.now()}`);
       if (!res.ok) return null;
       latest = await res.json().catch(() => null);
     }
@@ -118,16 +125,16 @@ export async function checkPixelHqUpdate(notifyUser = true) {
     if (notifyUser && dismissed !== upd.version) {
       if (urgent) {
         notify({
-          title: `⚠️ Urgent Pixel HQ update: ${versionLabel}`,
-          body: upd.notes ? `${upd.notes} · Click to update now` : `Critical update ${versionLabel} is out · Click to update now`,
+          title: `⚠️ Update penting Pixel HQ: ${versionLabel}`,
+          body: upd.notes ? `${upd.notes} · Klik buat update sekarang` : `Update penting ${versionLabel} udah rilis · Klik buat update sekarang`,
           level: "warning",
           timeout: 30000,
           action: { name: "company-agents.update" },
         });
       } else {
         notify({
-          title: "Pixel HQ update available",
-          body: `Version ${versionLabel} is out · Click to update`,
+          title: "Ada update Pixel HQ",
+          body: `Versi ${versionLabel} udah rilis · Klik buat update`,
           level: "info",
           timeout: 10000,
           action: { name: "company-agents.update" },
@@ -147,15 +154,15 @@ export async function executePixelHqUpdate() {
   updating = true;
   setShared("pixel-hq.updating", true);
   notify({
-    title: "Updating Pixel HQ...",
-    body: "Downloading release files from GitHub...",
+    title: "Lagi update Pixel HQ...",
+    body: "Lagi download file dari GitHub...",
     level: "info",
     timeout: 5000,
   });
 
   try {
     let targetSha = "main";
-    const treeRes = await fetch("https://api.github.com/repos/bnhan2710/pixel-hq/git/trees/main?recursive=1", {
+    const treeRes = await fetch(`https://api.github.com/repos/${REPO}/git/trees/main?recursive=1`, {
       headers: { "User-Agent": "Pixel-HQ-Updater" },
     }).catch(() => null);
     let fileList = [];
@@ -164,12 +171,12 @@ export async function executePixelHqUpdate() {
       if (treeData?.sha) targetSha = treeData.sha;
       if (Array.isArray(treeData?.tree)) {
         fileList = treeData.tree
-          .filter((f) => f.type === "blob" && (f.path.startsWith("layouts/") || f.path.startsWith("mods/") || f.path.startsWith("themes/")) && !f.path.endsWith("README.md") && !f.path.endsWith(".png") && !f.path.includes("company-brand/updater.js") && !f.path.includes("company-brand/sparkles.svg"))
+          .filter((f) => f.type === "blob" && (f.path.startsWith("layouts/") || f.path.startsWith("mods/") || f.path.startsWith("themes/")) && !SKIP(f.path))
           .map((f) => f.path);
       }
     }
     if (!fileList.length) {
-      fileList = PIXEL_HQ_FILES.filter((f) => !f.endsWith(".png") && !f.includes("company-brand/updater.js") && !f.includes("company-brand/sparkles.svg"));
+      fileList = PIXEL_HQ_FILES.filter((f) => !SKIP(f));
     }
 
     fileList.sort((a, b) => {
@@ -188,10 +195,10 @@ export async function executePixelHqUpdate() {
     let newVersion = "latest";
 
     for (const p of fileList) {
-      const url = `https://raw.githubusercontent.com/bnhan2710/pixel-hq/${targetSha}/${p}?t=${Date.now()}`;
+      const url = `https://raw.githubusercontent.com/${REPO}/${targetSha}/${p}?t=${Date.now()}`;
       const res = await fetch(url);
       if (res.status === 404) continue;
-      if (!res.ok) throw new Error(`HTTP ${res.status} while fetching ${p}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status} waktu ngambil ${p}`);
       const content = await res.text();
       if (p === "mods/company-agents/version.json") {
         try { newVersion = JSON.parse(content).version; } catch {}
@@ -209,15 +216,15 @@ export async function executePixelHqUpdate() {
     setShared("pixel-hq.updating", null);
 
     notify({
-      title: "Pixel HQ updated!",
-      body: changed.length > 0 ? `Successfully updated to v${newVersion}!` : `Pixel HQ is already up to date (v${newVersion}).`,
+      title: "Pixel HQ ke-update!",
+      body: changed.length > 0 ? `Berhasil update ke v${newVersion}. Restart Herdr biar kepake.` : `Pixel HQ udah versi terbaru (v${newVersion}).`,
       level: "success",
       timeout: 8000,
     });
   } catch (err) {
     setShared("pixel-hq.updating", null);
     notify({
-      title: "Update failed",
+      title: "Update gagal",
       body: String(err?.message ?? err),
       level: "error",
       timeout: 8000,

@@ -1,7 +1,7 @@
 import { View, div, svg } from "gpui-kit";
 import { KanbanEngine } from "./kanban.js";
 import { h_flex } from "gpui-base";
-import { spaces, panes, focused, agents, theme, run, window, keys, setBadge, openOverlay, shared, setShared, appHome, home, exec, checking, settings, readTextFile, writeTextFile } from "herdr";
+import { spaces, panes, focused, agents, theme, run, window, keys, setBadge, openOverlay, shared, setShared, appHome, home, exec, checking, settings, readTextFile, writeTextFile, notify } from "herdr";
 
 const MONO = "JetBrains Mono, Menlo, monospace";
 
@@ -119,6 +119,33 @@ function fmtLeft(sec) {
   if (h >= 1) return `${h} jam ${m % 60} menit lagi`;
   return `${m} menit lagi`;
 }
+// Peringatan sekali per jendela usage (sesi 5 jam / minggu) untuk tiap ambang; yang sudah muncul diingat
+// di localStorage, jadi gak muncul lagi setelah restart sampai jendelanya reset.
+const USAGE_ALERTS = [80, 95];
+function usageAlerts(u) {
+  if (!u || Date.now() / 1000 - (u.at ?? 0) > 3600) return;
+  let fired = {};
+  try { fired = JSON.parse(localStorage.getItem("pixel-hq.usage-alerts") ?? "{}") ?? {}; } catch {}
+  let dirty = false;
+  for (const [id, label, w] of [["session", "sesi 5 jam", u.session], ["week", "minggu ini", u.week]]) {
+    if (typeof w?.used !== "number") continue;
+    const hit = USAGE_ALERTS.filter((th) => w.used >= th).pop();
+    if (hit === undefined) continue;
+    const key = `${id}:${w.resets ?? "?"}:${hit}`;
+    if (fired[key]) continue;
+    fired[key] = Date.now(); dirty = true;
+    const left = fmtLeft(w.resets);
+    try {
+      notify({ title: `Usage Claude ${label} udah ${Math.round(w.used)}%`, body: left ? `Reset ${left}. Klik buat lihat detail.` : "Klik buat lihat detail.",
+        level: hit >= 95 ? "error" : "warning", timeout: 20000, action: { name: "mod.open", args: { name: "company-usage" } } });
+    } catch {}
+  }
+  if (dirty) {
+    const week = Date.now() - 8 * 86400000;
+    for (const k of Object.keys(fired)) if (fired[k] < week) delete fired[k];
+    try { localStorage.setItem("pixel-hq.usage-alerts", JSON.stringify(fired)); } catch {}
+  }
+}
 const usageColor = (p) => (p >= 90 ? "#f38ba8" : p >= 70 ? "#f9b84a" : "#89b4fa");
 function usageCell(label, w, t) {
   if (typeof w?.used !== "number") return null;
@@ -141,6 +168,7 @@ export default class WorkspaceStatus extends View {
         const raw = await readTextFile(`${home()}/.local/state/pixel-hq/claude-usage.json`).catch(() => null);
         const u = raw ? JSON.parse(raw) : null;
         if (JSON.stringify(u) !== JSON.stringify(this.usage)) { this.usage = u; cx.notify(); }
+        usageAlerts(u);
       } catch {}
     });
     loadUsage(cx);
@@ -283,7 +311,8 @@ export default class WorkspaceStatus extends View {
         const tip = `Pemakaian Claude Code${stale ? " (data udah lama, jalanin Claude dulu biar ke-update)" : ""}\n`
           + `Sesi 5 jam: ${typeof u.session?.used === "number" ? Math.round(u.session.used) + "% terpakai" : "-"}${fmtLeft(u.session?.resets) ? ", reset " + fmtLeft(u.session.resets) : ""}\n`
           + `Minggu ini: ${typeof u.week?.used === "number" ? Math.round(u.week.used) + "% terpakai" : "-"}${fmtLeft(u.week?.resets) ? ", reset " + fmtLeft(u.week.resets) : ""}`;
-        return el.child(h_flex().id("claude-usage").gap(10).items_center().px(6).tooltip(tip).opacity(stale ? 0.55 : 1)
+        return el.child(h_flex().id("claude-usage").gap(10).items_center().px(6).tooltip(tip + "\nKlik buat riwayat dan pemakaian per staf").opacity(stale ? 0.55 : 1)
+          .cursor_pointer().hover((s) => s.bg(t.hover)).on_click(() => run("mod.open", { name: "company-usage" }))
           .child(div().text_color(t.dim).child("CLAUDE"))
           .child(usageCell("SESI", u.session, t) ?? div())
           .child(usageCell("MINGGU", u.week, t) ?? div()));
@@ -454,7 +483,7 @@ export default class WorkspaceStatus extends View {
           .id("btn-kanban")
           .tooltip("Buka papan kanban: task yang dipindah ke 'sedang dikerjakan' dikerjain agent otomatis")
           .on_click(() => run("mod.open", { name: "company-kanban" }))
-          .child(`KANBAN${this.kb?.counts?.doing ? ` · ${this.kb.counts.doing} JALAN` : this.kb?.counts?.todo ? ` · ${this.kb.counts.todo}` : ""}`)
+          .child(`KANBAN${this.kb?.counts?.doing ? ` · ${this.kb.counts.doing} JALAN` : this.kb?.counts?.todo ? ` · ${this.kb.counts.todo}` : ""}${this.kb?.counts?.failed ? ` · ${this.kb.counts.failed} GAGAL` : ""}`)
       )
       .child(
         chip(h_flex(), t)

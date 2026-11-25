@@ -38,11 +38,11 @@ const SPECIES = {
 };
 
 const AGENTS = [
-  { match: (k) => k.includes("hermes"), species: "herald", role: "Chief of Staff" },
-  { match: (k) => k.includes("claude"), species: "crab", role: "Staff Engineer" },
-  { match: (k) => k.includes("codex"), species: "bot", role: "Code Reviewer" },
-  { match: (k) => k.includes("opencode"), species: "penguin", role: "Platform Engineer" },
-  { match: (k) => k.includes("antigravity") || k === "agy", species: "arch", role: "Systems Architect" },
+  { match: (k) => k.includes("hermes"), species: "herald", role: "Kepala Staf", roleEn: "Chief of Staff" },
+  { match: (k) => k.includes("claude"), species: "crab", role: "Engineer Senior", roleEn: "Staff Engineer" },
+  { match: (k) => k.includes("codex"), species: "bot", role: "Peninjau Kode", roleEn: "Code Reviewer" },
+  { match: (k) => k.includes("opencode"), species: "penguin", role: "Engineer Platform", roleEn: "Platform Engineer" },
+  { match: (k) => k.includes("antigravity") || k === "agy", species: "arch", role: "Arsitek Sistem", roleEn: "Systems Architect" },
 ];
 export function agentOf(key) {
   const k = String(key ?? "").toLowerCase();
@@ -158,13 +158,13 @@ export const DUCK_CENTER = (ROOM + 125) / WIDTH;
 
 // The moods a figure set can pick, in the order the editor shows them.
 export const MOODS = [
-  { id: "stab", label: "Typing" },
-  { id: "angry", label: "Waving" },
-  { id: "scowl", label: "Waving, urgent" },
-  { id: "happy", label: "Celebrating" },
-  { id: "content", label: "Coffee break" },
-  { id: "snooze", label: "Snoozing" },
-  { id: "urge", label: "Urge / Wake up" },
+  { id: "stab", label: "Ngetik" },
+  { id: "angry", label: "Melambai" },
+  { id: "scowl", label: "Melambai, mendesak" },
+  { id: "happy", label: "Merayakan" },
+  { id: "content", label: "Ngopi" },
+  { id: "snooze", label: "Tidur" },
+  { id: "urge", label: "Disenggol / Bangun" },
 ];
 
 export function duck(status, height, waited = 0) {

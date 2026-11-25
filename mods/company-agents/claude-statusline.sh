@@ -112,21 +112,50 @@ try:
         ud = os.path.expanduser("~/.local/state/pixel-hq")
         os.makedirs(ud, exist_ok=True)
         _o = {"at": int(_t.time()), "session": {"used": five.get("used_percentage"), "resets": five.get("resets_at")}, "week": {"used": sev.get("used_percentage"), "resets": sev.get("resets_at")}}
-        _tmp = ud + "/claude-usage.json.tmp"
+        _tmp = ud + "/claude-usage.json.tmp.%d" % os.getpid()
         open(_tmp, "w").write(json.dumps(_o))
         os.replace(_tmp, ud + "/claude-usage.json")
+        # Riwayat buat grafik di dialog usage: [waktu, sesi %, minggu %], paling sering tiap 5 menit
+        # (atau kalau angkanya berubah), disimpan 14 hari.
+        _hp = ud + "/claude-usage-history.json"
+        try:
+            _h = json.load(open(_hp))
+            if not isinstance(_h, list): _h = []
+        except Exception:
+            _h = []
+        _now = _o["at"]
+        _row = [_now, five.get("used_percentage"), sev.get("used_percentage")]
+        if not _h or _now - _h[-1][0] >= 300 or _h[-1][1:] != _row[1:]:
+            _h = [r for r in _h if isinstance(r, list) and len(r) == 3 and _now - r[0] < 14 * 86400]
+            if _h and _now - _h[-1][0] < 60: _h[-1] = _row
+            else: _h.append(_row)
+            _tmp = _hp + ".tmp.%d" % os.getpid()
+            open(_tmp, "w").write(json.dumps(_h, separators=(",", ":")))
+            os.replace(_tmp, _hp)
 except Exception:
     pass
-print(pct + "|" + model + "|" + quota + "|" + effort)
+# Token dan biaya sesi ini, buat tabel per staf di dialog usage
+cost = ""
+tokens = ""
+try:
+    _c = d.get("cost") if isinstance(d.get("cost"), dict) else {}
+    if isinstance(_c.get("total_cost_usd"), (int, float)): cost = "%.4f" % _c["total_cost_usd"]
+    _ti, _to = c.get("total_input_tokens"), c.get("total_output_tokens")
+    if isinstance(_ti, (int, float)) or isinstance(_to, (int, float)): tokens = str(int((_ti or 0) + (_to or 0)))
+except Exception:
+    pass
+print(pct + "|" + model + "|" + quota + "|" + effort + "|" + cost + "|" + tokens)
 ' 2>/dev/null)
-pct=${fields%%\|*}; rest=${fields#*\|}; model=${rest%%\|*}; rest=${rest#*\|}; quota=${rest%%\|*}; effort=${rest#*\|}
+pct=${fields%%\|*}; rest=${fields#*\|}; model=${rest%%\|*}; rest=${rest#*\|}; quota=${rest%%\|*}; rest=${rest#*\|}
+effort=${rest%%\|*}; rest=${rest#*\|}; cost=${rest%%\|*}; tokens=${rest#*\|}
 
 if [ -n "$HC_TERMINAL_ID" ] && command -v hc >/dev/null 2>&1; then
   hc label "$HC_TERMINAL_ID" \
     "agent.context=$pct" "claude.context=$pct" "agy.context=$pct" \
     "agent.model=$model" "claude.model=$model" "agy.model=$model" \
     "agent.quota=$quota" "claude.quota=$quota" "agy.quota=$quota" \
-    "agent.effort=$effort" "claude.effort=$effort" "agy.effort=$effort" >/dev/null 2>&1 &
+    "agent.effort=$effort" "claude.effort=$effort" "agy.effort=$effort" \
+    "agent.cost=$cost" "agent.tokens=$tokens" >/dev/null 2>&1 &
 fi
 if [ -n "$pct" ]; then
   if [ -n "$quota" ]; then printf '%s · %s%% context · %s%% 5h left' "$model" "$pct" "$quota"; else printf '%s · %s%% context' "$model" "$pct"; fi

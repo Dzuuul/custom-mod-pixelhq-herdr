@@ -16,49 +16,49 @@ const box = (frame, fill, shadow) => [
 
 const HOTKEY_CATEGORIES = [
   {
-    category: "Workspace Floors",
+    category: "Lantai (space)",
     items: [
-      { action: "mod.open:company-switcher", name: "Floor Switcher", desc: "Open floor switcher (hold Ctrl and press P repeatedly to cycle)" },
-      { action: "space.next", name: "Next Floor", desc: "Switch to next workspace floor" },
-      { action: "space.prev", name: "Previous Floor", desc: "Switch to previous workspace floor" },
-      { action: "space.new", name: "New Floor", desc: "Create a new workspace floor" },
-      { action: "space.select:1", name: "Jump to Floor 1–9", desc: "Jump directly to floor 1–9", customKeys: ["alt-1 … alt-9"] },
-      { action: "space.rename", name: "Rename Floor", desc: "Rename current workspace floor" },
+      { action: "mod.open:company-switcher", name: "Pindah lantai", desc: "Buka daftar lantai (tahan Ctrl lalu tekan P berulang buat ganti)" },
+      { action: "space.next", name: "Lantai berikutnya", desc: "Pindah ke lantai berikutnya" },
+      { action: "space.prev", name: "Lantai sebelumnya", desc: "Pindah ke lantai sebelumnya" },
+      { action: "space.new", name: "Lantai baru", desc: "Bikin lantai baru" },
+      { action: "space.select:1", name: "Lompat ke lantai 1–9", desc: "Langsung ke lantai 1–9", customKeys: ["alt-1 … alt-9"] },
+      { action: "space.rename", name: "Ganti nama lantai", desc: "Ganti nama lantai sekarang" },
     ],
   },
   {
-    category: "Split Panes",
+    category: "Bagi panel",
     items: [
-      { action: "pane.split:right", name: "Split Right", desc: "Split active pane vertically to the right" },
-      { action: "pane.split:down", name: "Split Down", desc: "Split active pane horizontally downward" },
-      { action: "pane.close", name: "Close Pane", desc: "Close active workspace pane" },
-      { action: "pane.zoom", name: "Toggle Zoom", desc: "Toggle maximize / restore active pane" },
-      { action: "layout.switch", name: "Switch Layout", desc: "Switch active display layout" },
-      { action: "pane.go:left", name: "Focus Navigation", desc: "Navigate focus between adjacent panes", customKeys: ["alt-h / j / k / l", "alt-left / right"] },
+      { action: "pane.split:right", name: "Bagi ke kanan", desc: "Bagi panel aktif ke arah kanan" },
+      { action: "pane.split:down", name: "Bagi ke bawah", desc: "Bagi panel aktif ke arah bawah" },
+      { action: "pane.close", name: "Tutup panel", desc: "Tutup panel aktif" },
+      { action: "pane.zoom", name: "Zoom panel", desc: "Perbesar / kembalikan panel aktif" },
+      { action: "layout.switch", name: "Ganti layout", desc: "Ganti layout tampilan" },
+      { action: "pane.go:left", name: "Pindah fokus", desc: "Pindah fokus ke panel sebelah", customKeys: ["alt-h / j / k / l", "alt-left / right"] },
     ],
   },
   {
-    category: "Tabs & Terminals",
+    category: "Tab & terminal",
     items: [
-      { action: "tab.new", name: "New Tab", desc: "Open a new terminal tab in active pane" },
-      { action: "tab.close", name: "Close Tab", desc: "Close current terminal tab" },
-      { action: "tab.next", name: "Next Tab", desc: "Switch to next tab" },
-      { action: "tab.prev", name: "Previous Tab", desc: "Switch to previous tab" },
-      { action: "tab.select:1", name: "Jump to Tab 1–9", desc: "Jump directly to tab 1–9", customKeys: ["ctrl-1 … ctrl-9"] },
-      { action: "tab.rename", name: "Rename Tab", desc: "Rename current terminal tab" },
-      { action: "terminal.copy", name: "Copy Selection", desc: "Copy selection from terminal" },
-      { action: "terminal.paste", name: "Paste", desc: "Paste clipboard text into terminal" },
-      { action: "terminal.search", name: "Search Terminal", desc: "Search scrollback buffer in terminal" },
+      { action: "tab.new", name: "Tab baru", desc: "Buka tab terminal baru di panel aktif" },
+      { action: "tab.close", name: "Tutup tab", desc: "Tutup tab terminal sekarang" },
+      { action: "tab.next", name: "Tab berikutnya", desc: "Pindah ke tab berikutnya" },
+      { action: "tab.prev", name: "Tab sebelumnya", desc: "Pindah ke tab sebelumnya" },
+      { action: "tab.select:1", name: "Lompat ke tab 1–9", desc: "Langsung ke tab 1–9", customKeys: ["ctrl-1 … ctrl-9"] },
+      { action: "tab.rename", name: "Ganti nama tab", desc: "Ganti nama tab sekarang" },
+      { action: "terminal.copy", name: "Salin pilihan", desc: "Salin teks yang dipilih di terminal" },
+      { action: "terminal.paste", name: "Tempel", desc: "Tempel isi clipboard ke terminal" },
+      { action: "terminal.search", name: "Cari di terminal", desc: "Cari di riwayat output terminal" },
     ],
   },
   {
-    category: "System & Palette",
+    category: "Sistem & palet",
     items: [
-      { action: "app.palette", name: "Command Palette", desc: "Open global command palette" },
-      { action: "app.settings", name: "Settings", desc: "Open application settings" },
-      { action: "app.help", name: "Help", desc: "Open help and documentation" },
-      { action: "layout.toggle:sidebar", name: "Toggle Sidebar", desc: "Toggle left sidebar" },
-      { action: "app.zoom_in", name: "Zoom In / Out / Reset", desc: "Adjust UI zoom scale", customKeys: ["ctrl-+", "ctrl--", "ctrl-0"] },
+      { action: "app.palette", name: "Palet perintah", desc: "Buka palet perintah" },
+      { action: "app.settings", name: "Pengaturan", desc: "Buka pengaturan aplikasi" },
+      { action: "app.help", name: "Bantuan", desc: "Buka bantuan dan dokumentasi" },
+      { action: "layout.toggle:sidebar", name: "Sidebar", desc: "Tampilkan / sembunyikan sidebar kiri" },
+      { action: "app.zoom_in", name: "Perbesar / perkecil / reset", desc: "Atur ukuran tampilan", customKeys: ["ctrl-+", "ctrl--", "ctrl-0"] },
     ],
   },
 ];
@@ -174,7 +174,7 @@ export default class CompanyHotkeys extends View {
                       .text_size(12)
                       .font_bold()
                       .text_color("#cdd6f4")
-                      .child("HOTKEYS REFERENCE"),
+                      .child("DAFTAR HOTKEY"),
                   )
                   .child(
                     div()
@@ -186,7 +186,7 @@ export default class CompanyHotkeys extends View {
                       .text_size(9)
                       .font_bold()
                       .text_color("#89b4fa")
-                      .child("READ-ONLY"),
+                      .child("CUMA BACA"),
                   ),
               )
               .child(
@@ -328,8 +328,8 @@ export default class CompanyHotkeys extends View {
               .font_family(MONO)
               .text_size(9)
               .text_color("#6c7086")
-              .child("HOLD CTRL + TAP P TO CYCLE FLOORS · ALT+[ / ALT+] SWITCH FLOORS")
-              .child("ESC CLOSE"),
+              .child("TAHAN CTRL + TEKAN P BUAT GANTI LANTAI · ALT+[ / ALT+] PINDAH LANTAI")
+              .child("ESC TUTUP"),
           ),
       );
   }

@@ -14,7 +14,7 @@ import { PLAYS, svgToWebp } from "./animate.js";
 import { agentTaskArgv } from "./crew.js";
 
 const ICON = (n) => (n.includes("/") ? n : `mods/company-agents/${n}.svg`);
-const SPEEDS = [{ ms: 800, label: "Slow" }, { ms: 400, label: "Normal" }, { ms: 180, label: "Fast" }];
+const SPEEDS = [{ ms: 800, label: "Pelan" }, { ms: 400, label: "Normal" }, { ms: 180, label: "Cepat" }];
 const EMOJI = ["🦆", "🐥", "🦢", "🐸", "🐢", "🦫", "🐟", "🪿", "🔪", "🙋", "😤", "😠", "🎉", "✨", "💤", "🌙", "☕", "🔥", "⏳", "✅"];
 const kindOf = (spec) => (spec?.image ? "image" : spec?.text ? "text" : "duck");
 const words = (s) => s.split(/\s+/).filter(Boolean);
@@ -30,9 +30,9 @@ export class Editor {
     this.openRow = p.space ?? null;
     this.pictures = null;
     this.error = null;
-    this.nameInput = InputState.new({ placeholder: "Set name" });
+    this.nameInput = InputState.new({ placeholder: "Nama set" });
     this.nameInput.on("change", (_e, cx) => this.rename(cx));
-    this.textInput = InputState.new({ placeholder: "Emoji or text, space between frames: 🦆 🐥" });
+    this.textInput = InputState.new({ placeholder: "Emoji atau teks, pisahkan frame pakai spasi: 🦆 🐥" });
     this.textInput.on("change", (_e, cx) => this.retext(cx));
     this.syncInputs();
     this.scan(cx);
@@ -101,7 +101,7 @@ export class Editor {
     change(c);
     const saving = save(c);
     cx.spawn(async (cx) => {
-      try { await saving; this.error = null; } catch (e) { this.error = `Couldn't save: ${e.message ?? e}`; }
+      try { await saving; this.error = null; } catch (e) { this.error = `Gagal nyimpen: ${e.message ?? e}`; }
       cx.notify();
     });
   }
@@ -123,7 +123,7 @@ export class Editor {
     const name = this.nameInput.value();
     if (isShipped(this.setId) || allSets()[this.setId]?.name === name) return;
     this.renameTask?.cancel();
-    this.renameTask = cx.timer.after(350, (cx) => this.commit(cx, (c) => { const s = this.ownSet(c); if (s) s.name = name.trim() || "Untitled set"; }));
+    this.renameTask = cx.timer.after(350, (cx) => this.commit(cx, (c) => { const s = this.ownSet(c); if (s) s.name = name.trim() || "Set tanpa nama"; }));
   }
 
   retext(cx) {
@@ -157,7 +157,7 @@ export class Editor {
     const from = allSets()[this.setId] ?? SHIPPED[DEFAULT_SET];
     const id = `set-${Date.now().toString(36)}`;
     const names = new Set(Object.values(allSets()).map((s) => s.name));
-    let name = isShipped(this.setId) ? `My ${from.name.replace(/^My /, "")}` : `${from.name} copy`;
+    let name = isShipped(this.setId) ? `${from.name.replace(/ punyaku$/, "")} punyaku` : `${from.name} salinan`;
     for (let n = 2; names.has(name); n++) name = `${name.replace(/ \d+$/, "")} ${n}`;
     this.commit(cx, (c) => { c.sets[id] = { name, slots: clone(from.slots) }; });
     this.setId = id;
@@ -213,7 +213,7 @@ export class Editor {
   drop(cx, paths) {
     cx.spawn(async (cx) => {
       const added = await addPictures(paths).catch(() => []);
-      if (!added.length) { this.error = "Drop PNG, JPEG, GIF, WebP or SVG pictures."; cx.notify(); return; }
+      if (!added.length) { this.error = "Taruh gambar PNG, JPEG, GIF, WebP, atau SVG."; cx.notify(); return; }
       this.pictures = await library().catch(() => this.pictures);
       this.pickKind = null;
       if (isShipped(this.setId)) return cx.notify();
@@ -267,7 +267,7 @@ export class Editor {
       const s = sets[id];
       const on = id === this.setId;
       const n = uses(id);
-      const tags = [isShipped(id) ? "Built-in" : null, c.default === id ? "Default" : null, n ? `${n} space${n > 1 ? "s" : ""}` : null].filter(Boolean);
+      const tags = [isShipped(id) ? "Bawaan" : null, c.default === id ? "Utama" : null, n ? `${n} space` : null].filter(Boolean);
       return h_flex().id(`set-${id}`).px(8).py(6).gap(8).rounded(8).items_center().cursor_pointer()
         .when(on, (el) => el.bg(t.selected)).hover((s) => s.bg(on ? t.selected : t.hover))
         .on_click((_e, cx) => this.select(cx, id))
@@ -279,12 +279,12 @@ export class Editor {
     const own = Object.keys(c.sets);
     return v_flex().w(220).h_full().flex_none().border_r(1).border_color(t.border).bg(t.chrome)
       .child(v_flex().id("set-list").flex_1().min_h(0).p(8).gap(2).overflow_y_scrollbar()
-        .child(div().px(8).pt(2).pb(4).text_size(11).text_color(t.dim).child("Built-in"))
+        .child(div().px(8).pt(2).pb(4).text_size(11).text_color(t.dim).child("Bawaan"))
         .children(Object.keys(SHIPPED).map(row))
-        .child(div().px(8).pt(10).pb(4).text_size(11).text_color(t.dim).child("Yours"))
-        .when(own.length === 0, (el) => el.child(div().px(8).text_size(11.5).text_color(t.dim).child("None yet. Duplicate a set to make one.")))
+        .child(div().px(8).pt(10).pb(4).text_size(11).text_color(t.dim).child("Punyamu"))
+        .when(own.length === 0, (el) => el.child(div().px(8).text_size(11.5).text_color(t.dim).child("Belum ada. Gandakan satu set buat bikin punyamu.")))
         .children(own.map(row)))
-      .child(div().p(8).border_t(1).border_color(t.border).child(this.button(t, "new-set", "New set from this one", (cx) => this.duplicate(cx), { icon: "plus" })));
+      .child(div().p(8).border_t(1).border_color(t.border).child(this.button(t, "new-set", "Set baru dari yang ini", (cx) => this.duplicate(cx), { icon: "plus" })));
   }
 
   slotCards(t, set) {
@@ -301,18 +301,18 @@ export class Editor {
     const failed = this.convertError?.setId === this.setId && this.convertError.slot === this.slot ? this.convertError : null;
     return v_flex().gap(8)
       .child(h_flex().gap(6).flex_wrap().items_center()
-        .child(div().w(70).text_size(12).text_color(t.muted).child("Motion"))
-        .when(ownable, (el) => el.child(this.chip(t, "motion-own", busy ? "Converting…" : OWN_MOTION.label, spec.motion === "own",
+        .child(div().w(70).text_size(12).text_color(t.muted).child("Gerakan"))
+        .when(ownable, (el) => el.child(this.chip(t, "motion-own", busy ? "Lagi diubah…" : OWN_MOTION.label, spec.motion === "own",
           (cx) => (busy ? null : spec.source && spec.motion !== "own" ? this.patchSpec(cx, { motion: "own" }) : this.keepOwn(cx, spec.image)))
-          .tooltip(pic?.needsConvert ? "Keep this SVG's own animation: turns it into a moving picture Herdr can play" : "Play the picture's own animation, nothing added")))
+          .tooltip(pic?.needsConvert ? "Pertahankan animasi SVG ini: diubah jadi gambar bergerak yang bisa diputar Herdr" : "Putar animasi bawaan gambarnya, tanpa tambahan")))
         .children(MOTIONS.map((m) => this.chip(t, `motion-${m.id}`, m.label, (spec.motion ?? "none") === m.id, (cx) => this.patchSpec(cx, { motion: m.id })))))
       .when(Boolean(pic?.needsConvert) && !busy && !failed && spec.motion !== "own", (el) => el.child(div().pl(78).text_size(11.5).text_color(t.dim)
-        .child("This SVG moves by itself, but Herdr shows SVGs still. Own animation keeps the movement.")))
+        .child("SVG ini bergerak sendiri, tapi Herdr nampilin SVG diam. Animasi sendiri bikin gerakannya tetap ada.")))
       .when(busy, (el) => el.child(div().pl(78).text_size(11.5).text_color(t.muted)
-        .child("Turning the SVG's animation into a moving picture… a few seconds.")))
+        .child("Lagi ngubah animasi SVG jadi gambar bergerak… beberapa detik.")))
       .when(Boolean(failed), (el) => el.child(h_flex().pl(78).gap(8).items_center().flex_wrap()
         .child(div().text_size(11.5).text_color(t.blocked).child(failed.message))
-        .when(Boolean(this.agent), (el) => el.child(this.button(t, "convert-ai", `Convert with ${this.agent.name}`,
+        .when(Boolean(this.agent), (el) => el.child(this.button(t, "convert-ai", `Ubah pakai ${this.agent.name}`,
           (cx) => this.tweakWithAI(cx, { path: failed.path, slot: failed.slot, error: failed.message }), { icon: "mods/company-agents/sparkles.svg" })))));
   }
 
@@ -320,12 +320,12 @@ export class Editor {
     const spec = specFor(set, this.slot);
     const kind = this.pickKind ?? kindOf(spec);
     const kinds = [
-      { id: "duck", label: "Duck", spec: { duck: "stab" } },
-      { id: "image", label: "Picture", spec: { image: this.pictures?.[0]?.path, motion: "bob" } },
+      { id: "duck", label: "Bebek", spec: { duck: "stab" } },
+      { id: "image", label: "Gambar", spec: { image: this.pictures?.[0]?.path, motion: "bob" } },
       { id: "text", label: "Emoji", spec: { text: ["🦆"], ms: 400, motion: "bob" } },
     ];
     const head = h_flex().gap(6).items_center()
-      .child(div().w(70).text_size(12).text_color(t.muted).child("Figure"))
+      .child(div().w(70).text_size(12).text_color(t.muted).child("Figur"))
       .children(kinds.map((k) => this.chip(t, `kind-${k.id}`, k.label, kind === k.id, (cx) => {
         if (kind === k.id) return;
         this.pickKind = null;
@@ -340,9 +340,9 @@ export class Editor {
         .child(h_flex().gap(8).flex_wrap().children(MOODS.map((m) =>
           this.tile(t, `mood-${m.id}`, figure({ duck: m.id, still: spec.still }, 40), m.label, spec.duck === m.id, (cx) => this.patchSpec(cx, { duck: m.id })))))
         .child(h_flex().gap(6).items_center()
-          .child(div().w(70).text_size(12).text_color(t.muted).child("Motion"))
-          .child(this.chip(t, "duck-anim", "Animated", !spec.still, (cx) => this.patchSpec(cx, { still: undefined })))
-          .child(this.chip(t, "duck-still", "Still", Boolean(spec.still), (cx) => this.patchSpec(cx, { still: true }))));
+          .child(div().w(70).text_size(12).text_color(t.muted).child("Gerakan"))
+          .child(this.chip(t, "duck-anim", "Bergerak", !spec.still, (cx) => this.patchSpec(cx, { still: undefined })))
+          .child(this.chip(t, "duck-still", "Diam", Boolean(spec.still), (cx) => this.patchSpec(cx, { still: true }))));
     } else if (kind === "image") {
       const pics = this.pictures ?? [];
       body = v_flex().gap(10)
@@ -354,29 +354,29 @@ export class Editor {
                   this.pickKind = null;
                   const motion = p.animated && !p.needsConvert ? "own" : spec.motion === "own" ? "bob" : spec.motion ?? "bob";
                   this.setSpec(cx, { image: p.path, motion });
-                }).tooltip(p.needsConvert ? "Animated SVG: pick it, then Own animation to keep its movement" : p.animated ? "Moves by itself" : p.name)))
+                }).tooltip(p.needsConvert ? "SVG beranimasi: pilih, lalu Animasi sendiri biar gerakannya tetap ada" : p.animated ? "Bergerak sendiri" : p.name)))
             : div().p(16).rounded(9).border(1).border_dashed().border_color(t.input).text_size(12).text_color(t.dim)
-              .child(this.pictures ? "No pictures yet. Drop PNG, GIF, WebP or SVG files here." : "Looking for pictures…")))
+              .child(this.pictures ? "Belum ada gambar. Taruh file PNG, GIF, WebP, atau SVG di sini." : "Lagi nyari gambar…")))
         .child(h_flex().gap(8).items_center()
-          .child(this.button(t, "open-folder", `Open ${OWN_DIR}/`, () => openFolder(), { icon: "folder" }))
-          .child(this.button(t, "rescan", "Refresh", (cx) => this.scan(cx)))
-          .child(div().text_size(11.5).text_color(t.dim).child("or drop pictures on this list. ▶ moves by itself.")))
+          .child(this.button(t, "open-folder", `Buka ${OWN_DIR}/`, () => openFolder(), { icon: "folder" }))
+          .child(this.button(t, "rescan", "Muat ulang", (cx) => this.scan(cx)))
+          .child(div().text_size(11.5).text_color(t.dim).child("atau taruh gambar di daftar ini. ▶ = bergerak sendiri.")))
         .when(kindOf(spec) === "image", (el) => el.child(this.motionRow(t, spec)));
     } else {
       body = v_flex().gap(10)
         .child(h_flex().gap(8).items_center()
-          .child(div().w(70).text_size(12).text_color(t.muted).child("Frames"))
+          .child(div().w(70).text_size(12).text_color(t.muted).child("Frame"))
           .child(Input.new(this.textInput).flex_1().h(32).px(10).rounded(7).border(1).border_color(t.input).bg(t.background).text_size(14).text_color(t.foreground)))
         .child(h_flex().gap(4).flex_wrap().pl(78).children(EMOJI.map((e, i) =>
           div().id(`emoji-${i}`).size(30).flex().items_center().justify_center().rounded(6).text_size(18).cursor_pointer()
-            .hover((s) => s.bg(t.hover)).tooltip("Add as a frame")
+            .hover((s) => s.bg(t.hover)).tooltip("Tambah sebagai frame")
             .on_click((_e, cx) => {
               const list = [...words(this.textInput.value()), e];
               this.textInput.set_value(list.join(" "));
               this.patchSpec(cx, { text: list });
             }).child(e))))
         .child(h_flex().gap(6).items_center()
-          .child(div().w(70).text_size(12).text_color(t.muted).child("Speed"))
+          .child(div().w(70).text_size(12).text_color(t.muted).child("Kecepatan"))
           .children(SPEEDS.map((s) => this.chip(t, `speed-${s.ms}`, s.label, (spec.ms ?? 400) === s.ms, (cx) => this.patchSpec(cx, { ms: s.ms }))))
           .child(div().text_size(11.5).text_color(t.dim).child("between frames")))
         .child(this.motionRow(t, spec));
@@ -395,15 +395,15 @@ export class Editor {
           .child(shipped
             ? div().flex_1().text_size(15).font_semibold().text_color(t.foreground).child(set.name)
             : Input.new(this.nameInput).flex_1().h(32).px(10).rounded(7).border(1).border_color(t.input).bg(t.background).text_size(14).text_color(t.foreground))
-          .child(this.button(t, "make-default", c.default === this.setId ? "Default" : "Use everywhere", (cx) => this.assign(cx, null, this.setId),
+          .child(this.button(t, "make-default", c.default === this.setId ? "Utama" : "Pakai di semua space", (cx) => this.assign(cx, null, this.setId),
             { disabled: c.default === this.setId, icon: c.default === this.setId ? "check" : null }))
-          .when(!shipped, (el) => el.child(this.button(t, "ai", "Tweak with AI", (cx) => this.tweakWithAI(cx),
+          .when(!shipped, (el) => el.child(this.button(t, "ai", "Rapikan pakai AI", (cx) => this.tweakWithAI(cx),
             { icon: "mods/company-agents/sparkles.svg", disabled: !this.agent })
-            .tooltip(this.agent ? `Ask ${this.agent.name} to fix this set's pictures: backgrounds, animated SVGs, sizes` : "No agent installed (programs.json run entries)")))
-          .child(this.button(t, "dup", "Duplicate", (cx) => this.duplicate(cx), { primary: shipped }))
-          .when(!shipped, (el) => el.child(this.button(t, "delete", "Delete", (cx) => this.remove(cx), { danger: true }))))
+            .tooltip(this.agent ? `Minta ${this.agent.name} benerin gambar set ini: latar, SVG beranimasi, ukuran` : "Belum ada agent terpasang (entri run di programs.json)")))
+          .child(this.button(t, "dup", "Gandakan", (cx) => this.duplicate(cx), { primary: shipped }))
+          .when(!shipped, (el) => el.child(this.button(t, "delete", "Hapus", (cx) => this.remove(cx), { danger: true }))))
         .when(shipped, (el) => el.child(div().text_size(12).text_color(t.dim)
-          .child("Built-in sets can't be changed. Duplicate this one to pick your own figures.")))
+          .child("Set bawaan gak bisa diubah. Gandakan dulu buat milih figur sendiri.")))
         .child(this.slotCards(t, set))
         .child(div().text_size(12).text_color(t.muted).child(`${slot.label}: ${slot.hint.toLowerCase()}.`))
         .when(!shipped, (el) => el.child(this.picker(t, set))));
@@ -419,26 +419,26 @@ export class Editor {
       const own = name == null ? c.default : c.spaces[name];
       const shownId = name == null ? setIdFor(null, c) : setIdFor(name, c);
       const expanded = this.openRow === key;
-      const choices = [...(name == null ? [] : [{ id: null, label: `Default (${sets[setIdFor(null, c)]?.name})` }]),
+      const choices = [...(name == null ? [] : [{ id: null, label: `Utama (${sets[setIdFor(null, c)]?.name})` }]),
         ...Object.entries(sets).map(([id, s]) => ({ id, label: s.name || id }))];
       return v_flex().rounded(9).border(1).border_color(expanded ? t.input : t.border).bg(t.surface)
         .child(h_flex().id(`sp-${key}`).px(12).py(8).gap(12).items_center().cursor_pointer().rounded(9).hover((s) => s.bg(t.hover))
           .on_click((_e, cx) => { this.openRow = expanded ? null : key; cx.notify(); })
           .child(v_flex().w(190).flex_none().min_w(0)
-            .child(div().truncate().text_color(faded ? t.dim : t.foreground).font_medium().child(name ?? "Every other space"))
+            .child(div().truncate().text_color(faded ? t.dim : t.foreground).font_medium().child(name ?? "Space lainnya"))
             .child(div().truncate().text_size(11).text_color(t.dim)
-              .child(name == null ? "Spaces without their own pick" : faded ? "Not open right now" : own ? sets[own]?.name : "Uses the default")))
+              .child(name == null ? "Space yang belum punya pilihan sendiri" : faded ? "Lagi gak dibuka" : own ? sets[own]?.name : "Pakai set utama")))
           .child(div().flex_1().min_w(0).overflow_hidden().child(this.strip(t, sets[shownId], 26, `strip-${key}`)))
           .child(div().text_size(12).text_color(t.muted).child(sets[shownId]?.name ?? ""))
           .child(svg(ICON(expanded ? "chevron-down" : "chevron-right")).size(12).flex_none().text_color(t.dim)))
         .when(expanded, (el) => el.child(h_flex().px(12).pb(10).gap(6).flex_wrap()
           .children(choices.map((ch) => this.chip(t, `pick-${key}-${ch.id}`, ch.label, (own ?? null) === ch.id || (name == null && ch.id === shownId),
             (cx) => { this.assign(cx, name, ch.id); this.openRow = null; })))
-          .when(faded, (el) => el.child(this.chip(t, `forget-${key}`, "Forget this space", false, (cx) => this.assign(cx, name, null))))));
+          .when(faded, (el) => el.child(this.chip(t, `forget-${key}`, "Lupakan space ini", false, (cx) => this.assign(cx, name, null))))));
     };
     return v_flex().id("spaces-body").flex_1().min_h(0).p(16).gap(8).overflow_y_scrollbar()
       .child(div().text_size(12).text_color(t.muted).pb(4)
-        .child("Each space can have its own figures. Pick by space name: a space named after its repo keeps its pick when reopened."))
+        .child("Tiap space bisa punya figur sendiri. Dipilih per nama space: space yang dinamai sesuai repo-nya tetap pakai pilihannya waktu dibuka lagi."))
       .child(row(null, "default", false))
       .children(open.map((n, i) => row(n, `s${i}`, false)))
       .children(gone.map((n, i) => row(n, `g${i}`, true)));
@@ -453,16 +453,16 @@ export class Editor {
       .hover((s) => s.bg(t.hover)).on_click((_e, cx) => { this.tab = id; cx.notify(); }).child(label);
     return v_flex().size_full().bg(t.popover).text_size(13).text_color(t.foreground)
       .child(h_flex().h(52).px(16).gap(10).flex_none().items_center().border_b(1).border_color(t.border)
-        .child(v_flex().child(div().text_size(14).font_semibold().child("Pond figures"))
-          .child(div().text_size(11).text_color(t.dim).child("How each agent state looks, per space")))
+        .child(v_flex().child(div().text_size(14).font_semibold().child("Figur kolam"))
+          .child(div().text_size(11).text_color(t.dim).child("Tampilan tiap status agent, per space")))
         .child(div().flex_1())
-        .child(tab("sets", "Sets"))
-        .child(tab("spaces", "Spaces"))
+        .child(tab("sets", "Set"))
+        .child(tab("spaces", "Space"))
         .child(div().id("close").ml(8).size(28).flex().items_center().justify_center().rounded(7).cursor_pointer()
           .text_color(t.muted).hover((s) => s.bg(t.hover).text_color(t.foreground))
           .on_click(() => closeOverlay(props().overlay)).child(svg(ICON("x")).size(14))))
       .child(this.tab === "sets" ? this.setsTab(t, c) : this.spacesTab(t, c))
       .child(h_flex().h(30).px(16).flex_none().items_center().border_t(1).border_color(t.border).text_size(11).text_color(this.error ? t.blocked : t.dim)
-        .child(this.error ?? "Saved as you go to ~/.config/herdr-app/pond-agents.json"));
+        .child(this.error ?? "Tersimpan otomatis ke ~/.config/herdr-app/pond-agents.json"));
   }
 }
