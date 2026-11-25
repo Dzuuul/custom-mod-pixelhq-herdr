@@ -144,10 +144,18 @@ try:
     if isinstance(_ti, (int, float)) or isinstance(_to, (int, float)): tokens = str(int((_ti or 0) + (_to or 0)))
 except Exception:
     pass
-print(pct + "|" + model + "|" + quota + "|" + effort + "|" + cost + "|" + tokens)
+# Folder yang lagi dikerjakan agent, buat nama stasiun default (di WSL, Herdr Windows gak tahu folder ini)
+cwd = ""
+try:
+    _w = d.get("workspace") if isinstance(d.get("workspace"), dict) else {}
+    cwd = str(_w.get("current_dir") or d.get("cwd") or "").replace("\n", " ").replace("\r", " ")
+except Exception:
+    pass
+print(pct + "|" + model + "|" + quota + "|" + effort + "|" + cost + "|" + tokens + "|" + cwd)
 ' 2>/dev/null)
 pct=${fields%%\|*}; rest=${fields#*\|}; model=${rest%%\|*}; rest=${rest#*\|}; quota=${rest%%\|*}; rest=${rest#*\|}
-effort=${rest%%\|*}; rest=${rest#*\|}; cost=${rest%%\|*}; tokens=${rest#*\|}
+effort=${rest%%\|*}; rest=${rest#*\|}; cost=${rest%%\|*}; rest=${rest#*\|}
+tokens=${rest%%\|*}; cwd=${rest#*\|}
 
 if [ -n "$HC_TERMINAL_ID" ] && command -v hc >/dev/null 2>&1; then
   hc label "$HC_TERMINAL_ID" \
@@ -155,7 +163,7 @@ if [ -n "$HC_TERMINAL_ID" ] && command -v hc >/dev/null 2>&1; then
     "agent.model=$model" "claude.model=$model" "agy.model=$model" \
     "agent.quota=$quota" "claude.quota=$quota" "agy.quota=$quota" \
     "agent.effort=$effort" "claude.effort=$effort" "agy.effort=$effort" \
-    "agent.cost=$cost" "agent.tokens=$tokens" >/dev/null 2>&1 &
+    "agent.cost=$cost" "agent.tokens=$tokens" "agent.cwd=$cwd" >/dev/null 2>&1 &
 fi
 if [ -n "$pct" ]; then
   if [ -n "$quota" ]; then printf '%s · %s%% context · %s%% 5h left' "$model" "$pct" "$quota"; else printf '%s · %s%% context' "$model" "$pct"; fi

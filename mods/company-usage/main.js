@@ -3,6 +3,7 @@
 // Data: ~/.local/state/pixel-hq/claude-usage.json dan claude-usage-history.json ([waktu, sesi %, minggu %]).
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
+import { readState } from "./state.js";
 import { agents, terminals, shared, theme, home, readTextFile, closeOverlay, props } from "herdr";
 
 const MONO = "JetBrains Mono, Menlo, monospace";
@@ -44,8 +45,8 @@ export default class Usage extends View {
     this.history = [];
     const load = (cx) => cx.spawn(async (cx) => {
       const [u, h] = await Promise.all([
-        readTextFile(`${dir()}/claude-usage.json`).catch(() => null),
-        readTextFile(`${dir()}/claude-usage-history.json`).catch(() => null),
+        readState("claude-usage.json"),
+        readState("claude-usage-history.json"),
       ]);
       try { this.usage = u ? JSON.parse(u) : null; } catch {}
       try { const x = h ? JSON.parse(h) : []; this.history = Array.isArray(x) ? x : []; } catch {}

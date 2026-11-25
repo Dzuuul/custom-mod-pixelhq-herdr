@@ -5,7 +5,7 @@
 
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
-import { spaces, machines, panes, agents, run, openOverlay, exec, hc, theme, shared, setShared, watchFolder, window, layout } from "herdr";
+import { spaces, machines, panes, agents, terminals, run, openOverlay, exec, hc, theme, shared, setShared, watchFolder, window, layout } from "herdr";
 
 function find(node, id) {
   if (node?.id === id) return node;
@@ -128,6 +128,8 @@ export default class Spaces extends View {
     this.renaming = null;
     this.renameError = null;
     this.lineNames = [];
+    this.autoNamed = JSON.parse(localStorage.getItem("spaces.autonamed") ?? "{}"); // space -> nama yang dipasang mod ini
+    cx.timer.every(3000, () => this.autoName());
     this.refreshMachines(cx);
     cx.timer.every(15000, cx => this.refreshMachines(cx));
     // Refresh only when the refs could have changed (see `due`).
@@ -466,6 +468,33 @@ export default class Spaces extends View {
       if (target && from < at) dropBar(items[items.length - 1], true);
       return items;
     });
+  }
+
+  // Nama default stasiun ("~", karena folder Windows-nya home) diganti nama folder yang lagi dikerjakan agent,
+  // yang dilaporkan statusline sebagai label agent.cwd (di WSL, Herdr sendiri cuma tahu folder Windows).
+  // Nama buatan sendiri gak pernah diubah: hanya "~" atau nama yang dulu dipasang mod ini.
+  autoName() {
+    try {
+      const cwdOf = new Map();
+      for (const t of terminals()) if (t.labels?.["agent.cwd"]) cwdOf.set(t.address, t.labels["agent.cwd"]);
+      if (!cwdOf.size) return;
+      const lead = new Map();
+      for (const a of agents()) if (!lead.has(a.space) && cwdOf.has(a.address)) lead.set(a.space, cwdOf.get(a.address));
+      let changed = false;
+      for (const s of spaces()) {
+        const path = lead.get(s.id);
+        if (!path || s.machine) continue;
+        if (s.name !== "~" && s.name !== this.autoNamed[s.id]) continue;
+        const clean = path.replace(/[\\/]+$/, "");
+        if (/^\/(home\/[^/]+|root|Users\/[^/]+)$/.test(clean) || /^[A-Za-z]:\\Users\\[^\\]+$/.test(clean)) continue; // home: tetap "~"
+        const name = clean.split(/[\\/]+/).pop();
+        if (!name || name === s.name) continue;
+        run("space.rename", { id: s.id, name });
+        this.autoNamed[s.id] = name;
+        changed = true;
+      }
+      if (changed) localStorage.setItem("spaces.autonamed", JSON.stringify(this.autoNamed));
+    } catch {}
   }
 
   startRename(m, cx) {
