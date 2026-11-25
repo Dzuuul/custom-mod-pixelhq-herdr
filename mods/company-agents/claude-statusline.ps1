@@ -105,6 +105,7 @@ $quota = ''
 $effort = ''
 $cost = ''
 $tokens = ''
+$cwd = ''
 try {
   $m = P $d 'model'
   if (IsObj $m) { $model = Clean (First (P $m 'display_name') (P $m 'name') (P $m 'id') (P $m 'title')) }
@@ -221,6 +222,13 @@ try {
     }
   } catch {}
 
+  # The folder the agent works in, for the default space name
+  try {
+    $ws = P $d 'workspace'
+    $cwd = [string](First (P $ws 'current_dir') (P $d 'cwd'))
+    $cwd = [regex]::Replace($cwd, '[\x00-\x1f]', ' ')
+  } catch {}
+
   # Tokens and cost of this session, for the per-staff table in the usage dialog
   try {
     $tc = P (P $d 'cost') 'total_cost_usd'
@@ -248,6 +256,7 @@ if ($term) {
       }
       $argv += "agent.cost=$cost"
       $argv += "agent.tokens=$tokens"
+      $argv += "agent.cwd=$cwd"
       # like `hc ... >/dev/null 2>&1`, but waits the few ms hc takes (at most 3 s): sharing this console
       # (no CreateNoWindow) avoids starting a new hidden console, which would cost far more than the wait
       $psi = [System.Diagnostics.ProcessStartInfo]::new($hc, ((@($argv) | ForEach-Object { Quote-Arg $_ }) -join ' '))

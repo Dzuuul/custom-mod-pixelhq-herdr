@@ -1,3 +1,4 @@
+import { readState } from "./state.js";
 import { View, div, svg } from "gpui-kit";
 import { KanbanEngine } from "./kanban.js";
 import { h_flex } from "gpui-base";
@@ -81,7 +82,7 @@ export default class WorkspaceStatus extends View {
     cx.timer.every(3000, (cx) => this.kb.tick().then(() => cx.notify()).catch(() => {}));
     const loadUsage = (cx) => cx.spawn(async (cx) => {
       try {
-        const raw = await readTextFile(`${home()}/.local/state/pixel-hq/claude-usage.json`).catch(() => null);
+        const raw = await readState("claude-usage.json");
         const u = raw ? JSON.parse(raw) : null;
         if (JSON.stringify(u) !== JSON.stringify(this.usage)) { this.usage = u; cx.notify(); }
         usageAlerts(u);

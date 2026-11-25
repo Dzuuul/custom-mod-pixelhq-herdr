@@ -24,6 +24,7 @@ antarmuka berbahasa Indonesia santai, papan kanban yang bisa menyuruh agent kerj
 | **`uninstall.sh`** untuk mencopot atau memulihkan dari backup | `uninstall.sh` |
 | **MusicBox dihapus** (tombol, hotkey, mod, area radio di rak) | `company-status`, `company-agents`, `company-hotkeys` |
 | **Installer dan uninstaller Windows** (PowerShell, tanpa Python/`sh`) + statusLine & hook aktivitas versi PowerShell | `install.cmd`, `install.ps1`, `uninstall.cmd`, `uninstall.ps1`, `company-agents/*.ps1` |
+| **Windows + Claude Code di WSL**: usage, riwayat, dan hasil kerja kanban dibaca juga dari home WSL (yang terbaru dipakai); stasiun bernama `~` memakai nama folder kerja agent | `company-status/state.js`, `company-usage/state.js`, `company-spaces`, label `agent.cwd` |
 
 Yang sengaja tetap bahasa Inggris: perintah yang dikirim ke AI dari tombol "Rapikan pakai AI" di editor figur.
 

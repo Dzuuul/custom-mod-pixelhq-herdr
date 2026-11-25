@@ -7,13 +7,16 @@
 // supaya gak balapan dengan pengecekan "staf udah nganggur = task kelar".
 // Juga: task ditahan kalau usage Claude hampir habis, balasan yang berupa pertanyaan bikin kartu nunggu jawaban,
 // biaya/token per task dari label statusline, dan task dari terminal (pixel-hq-task) lewat pixel-hq-kanban-inbox.json.
-import { agents, terminals, spaces, panes, shared, hc, run, appHome, home, readTextFile, writeTextFile, notify } from "herdr";
+import { agents, terminals, spaces, panes, shared, hc, run, appHome, readTextFile, writeTextFile, notify } from "herdr";
+import { readState } from "./state.js";
 
 const file = () => `${appHome()}/pixel-hq-kanban.json`;
 // Ditulis cuma oleh pixel-hq-task (mods/company-kanban/pixel-hq-task.*); mesin ini cuma membacanya.
 const inboxFile = () => `${appHome()}/pixel-hq-kanban-inbox.json`;
-const usageFile = () => `${home()}/.local/state/pixel-hq/claude-usage.json`;
-const lastFile = (addr) => `${home()}/.local/state/pixel-hq/last/${addr}.json`;
+// File di ~/.local/state/pixel-hq (ditulis statusline dan hook Claude Code), dibaca lewat readState: di Windows
+// juga dari WSL, tempat Claude Code-nya bisa jalan. Itu manggil wsl.exe, jadi yang dicek terus-terusan di-cache.
+const USAGE = "claude-usage.json";
+const lastOf = (addr) => `last/${addr}.json`;
 const staffName = (a) => {
   const own = (shared("pixel-hq.names") ?? {})[a.pane]?.name; // nama acak/pilihan sendiri (company-agents/names.js)
   if (own) return own;
@@ -152,10 +155,21 @@ export function mergeInto(fresh, patches, added = [], imported = null) {
   return fresh;
 }
 
-const readJson = async (path) => { const r = await readTextFile(path).catch(() => null); try { return r ? JSON.parse(r) : null; } catch { return null; } };
+const parse = (r) => { try { return r ? JSON.parse(r) : null; } catch { return null; } };
+const readJson = async (path) => parse(await readTextFile(path).catch(() => null));
 
 export class KanbanEngine {
-  constructor() { this.busy = false; this.counts = { todo: 0, doing: 0, failed: 0, asking: 0, held: 0 }; }
+  constructor() { this.busy = false; this.counts = { todo: 0, doing: 0, failed: 0, asking: 0, held: 0 }; this.reads = new Map(); }
+
+  // Isi file state (JSON), dibaca ulang paling cepat tiap `maxAge` ms. 0 = selalu baca.
+  async state(rel, maxAge = 0) {
+    const c = this.reads.get(rel), now = Date.now();
+    if (maxAge && c && now - c.at < maxAge) return c.value;
+    const value = parse(await readState(rel).catch(() => null));
+    this.reads.set(rel, { at: now, value });
+    if (this.reads.size > 200) this.reads.delete(this.reads.keys().next().value);
+    return value;
+  }
 
   async tick() {
     if (this.busy) return false;
@@ -170,7 +184,7 @@ export class KanbanEngine {
       const importedBefore = JSON.stringify(d.imported ?? []);
       const now = Date.now(), ag = agents(), name = staffName;
       const byId = new Map(d.tasks.map((t) => [t.id, t]));
-      const hold = usageHold(await readJson(usageFile()), now);
+      const hold = usageHold(await this.state(USAGE, 20000), now);
       // staf yang lagi dipakai: task jalan yang sudah pegang staf, atau yang masih nunggu model/effort-nya dikembalikan
       const claimed = new Set(d.tasks.filter((t) => t.agent && ((t.column === "doing" && !t.failed) || t.restore?.length)).map((t) => t.agent));
       let changed = false;
@@ -268,7 +282,7 @@ export class KanbanEngine {
         if (t.asking) {
           // staf nanya balik: tunggu sampai dia kerja lagi (kamu udah jawab), atau udah ada balasan yang lebih baru
           // (jawaban yang dikerjakan kilat, di antara dua putaran mesin). Waktu nunggu ini gak dihitung ke batas waktu.
-          const j = await readJson(lastFile(a.address));
+          const j = a.status === "working" ? null : await this.state(lastOf(a.address), 10000);
           if (a.status === "working" || (j?.at && j.at > (t.resultAt ?? 0))) {
             delete t.asking; t.askedMs = (t.askedMs ?? 0) + Math.max(0, now - (t.askingSince ?? now)); delete t.askingSince; changed = true;
           } else { note(t, `${name(a)} nanya balik, nunggu jawaban kamu`); continue; }
@@ -296,7 +310,7 @@ export class KanbanEngine {
         // hasil kerja: pesan terakhir agent, ditulis hook Stop ke ~/.local/state/pixel-hq/last/<terminal>.json
         if (t.resultWanted && t.agent) {
           trackMeter(t);
-          const j = await readJson(lastFile(t.agent));
+          const j = await this.state(lastOf(t.agent));
           const fresh = j?.text && (t.resultAt != null ? j.at > t.resultAt : j.at * 1000 >= (t.sentAt ?? 0) - 5000);
           if (fresh) {
             t.result = String(j.text).slice(0, 4000); t.resultAt = j.at; delete t.resultWanted; changed = true;

@@ -77,6 +77,7 @@ const PIXEL_HQ_FILES = [
   "mods/company-status/branch.svg",
   "mods/company-status/kanban.js",
   "mods/company-status/main.js",
+  "mods/company-status/state.js",
   "mods/company-status/mod.json",
   "mods/company-status/monitor.svg",
   "mods/company-status/server.svg",
@@ -92,6 +93,7 @@ const PIXEL_HQ_FILES = [
   "mods/company-toast/mod.json",
   "mods/company-usage/main.js",
   "mods/company-usage/mod.json",
+  "mods/company-usage/state.js",
   "themes/pixel-hq.json",
 ];
 
