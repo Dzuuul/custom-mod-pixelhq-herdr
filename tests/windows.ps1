@@ -138,6 +138,16 @@ try {
   Check 'hook Stop versi lama tetap menyimpan balasan' ($r.code -eq 0 -and (Test-Path (Join-Path $StateDir 'last\t2.json'))) $r
   Remove-Item Env:HC_TERMINAL_ID
 
+  Write-Host '== PROBE SEMENTARA: argumen - lewat powershell -File'
+  $pa = Join-Path $F 'probe-adv.ps1'; $ps = Join-Path $F 'probe-simple.ps1'
+  [System.IO.File]::WriteAllText($pa, "param([Parameter(Position = 0)][string]`$Judul = '', [string]`$Detail = '')`r`n[Console]::Out.WriteLine(""J=[`$Judul] D=[`$Detail] A=[`$args]"")`r`n", $utf8)
+  [System.IO.File]::WriteAllText($ps, "param([string]`$Judul = '', [string]`$Detail = '')`r`n[Console]::Out.WriteLine(""J=[`$Judul] D=[`$Detail] A=[`$args]"")`r`n", $utf8)
+  foreach ($v in @(@($pa, '-Detail', '-', 'x'), @($pa, '-Detail:-', 'x'), @($pa, '-Detail', 'y', 'x'), @($ps, '-Detail', '-', 'x'), @($pa, 'x', '-'))) {
+    $r = Invoke-Ps $v[0] @($v[1..($v.Count - 1)]) $utf8.GetBytes('abc')
+    Write-Host ("PROBE " + (Split-Path -Leaf $v[0]) + ' ' + ($v[1..($v.Count - 1)] -join ' ') + " => exit $($r.code) out=[$($r.out.Trim())] err=[$($r.err.Trim())]")
+  }
+  $r = Invoke-Tool 'powershell.exe' @('-NoProfile', '-Command', "& '$pa' -Detail - x") $utf8.GetBytes('abc')
+  Write-Host "PROBE -Command & probe -Detail - x => exit $($r.code) out=[$($r.out.Trim())] err=[$($r.err.Trim())]"
   Write-Host '== pixel-hq-task'
   $inbox = Join-Path $Cfg 'pixel-hq-kanban-inbox.json'
   $r = Invoke-Tool $shim @('-Kerjakan', '-Model', 'sonnet', '-Batas', '30', '-Hentikan', 'Tes dari CI')
