@@ -2,5 +2,5 @@
   "place": "none",
   "title": "Usage Claude",
   "overlay": { "kind": "dialog", "frame": "none", "width": 760, "height": 600 },
-  "palette": [{ "title": "Usage Claude: riwayat dan per staf", "command": "mod.open", "args": { "name": "company-usage" }, "words": "usage pemakaian claude kuota quota token biaya cost limit" }]
+  "palette": [{ "title": "Usage Claude: riwayat, per staf, dan rekap kanban", "command": "mod.open", "args": { "name": "company-usage" }, "words": "usage pemakaian claude kuota quota token biaya cost limit rekap statistik laporan kanban" }]
 }

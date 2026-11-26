@@ -249,12 +249,12 @@ if ($null -ne $k) {
 # 3. data
 $state = Join-Path $UserHome '.local\state\pixel-hq'
 if ($Purge) {
-  foreach ($f in 'pixel-hq-kanban.json', 'pixel-hq-kanban-inbox.json', 'pixel-hq-kanban-inbox.json.lock') {
+  foreach ($f in 'pixel-hq-kanban.json', 'pixel-hq-kanban-inbox.json', 'pixel-hq-kanban-inbox.json.lock', 'pixel-hq-kanban-history.json', 'pixel-hq-kanban-templates.json') {
     $kb = Join-Path $Cfg $f
     if (Test-Path -LiteralPath $kb -PathType Leaf) { Remove-Item -LiteralPath $kb -Force }
   }
   if (Test-Path -LiteralPath $state) { Remove-Item -LiteralPath $state -Recurse -Force }
-  Write-Host 'Data kanban dan riwayat usage dihapus'
+  Write-Host 'Data kanban (papan, rekap, template) dan riwayat usage dihapus'
 } else {
   Write-Host "Data disimpan: $(Join-Path $Cfg 'pixel-hq-kanban.json') dan $state (hapus pakai -Purge)"
 }

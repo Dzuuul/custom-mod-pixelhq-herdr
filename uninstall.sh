@@ -116,9 +116,10 @@ fi
 
 # 3. data
 if [ "$MODE" = "purge" ]; then
-  rm -f "$CFG/pixel-hq-kanban.json" "$CFG/pixel-hq-kanban-inbox.json" "$CFG/pixel-hq-kanban-inbox.json.lock"
+  rm -f "$CFG/pixel-hq-kanban.json" "$CFG/pixel-hq-kanban-inbox.json" "$CFG/pixel-hq-kanban-inbox.json.lock" \
+    "$CFG/pixel-hq-kanban-history.json" "$CFG/pixel-hq-kanban-templates.json"
   rm -rf "$HOME/.local/state/pixel-hq"
-  echo "Data kanban dan riwayat usage dihapus"
+  echo "Data kanban (papan, rekap, template) dan riwayat usage dihapus"
 else
   echo "Data disimpan: $CFG/pixel-hq-kanban.json dan ~/.local/state/pixel-hq/ (hapus pakai --purge)"
 fi

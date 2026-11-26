@@ -18,6 +18,10 @@ antarmuka berbahasa Indonesia santai, papan kanban yang bisa menyuruh agent kerj
 | **Pencarian staf dua bahasa**: `ngetik`, `santai`, `kelar`, `nunggu` dan padanan Inggrisnya sama-sama jalan | `company-agents` |
 | **Papan Kanban** (dialog 3 kolom + panel kanan) dan mesin yang mengirim task ke staf, dengan **EDIT**, **STOP**, dan **LIHAT** di kartu | `company-kanban`, `company-status/kanban.js`, `layouts/pixel-hq.json` |
 | Kanban yang **tahu kapan berhenti**: task ditahan kalau usage Claude hampir habis, kartu **PERLU JAWABAN** kalau staf nanya balik, batas waktu yang bisa menghentikan agent, dan biaya/token per task | `company-status/kanban.js`, `company-kanban` |
+| Kanban yang **bisa ditinggal** (2.3): **CEK** otomatis setelah agent berhenti (gagal = agent disuruh benerin), **jawab dari kartu**, **worktree** per task dan ringkasan **diff**, **bawa hasil** task sebelumnya, **batas biaya**, **jadwal** (jam mulai, tiap hari, hari kerja) dan **template** | `company-status/kanban.js`, `company-kanban` |
+| **Notifikasi ke HP** (ntfy, Discord, Slack, Telegram) waktu task kelar, nanya balik, atau gagal, kalau jendela Herdr lagi gak kamu lihat | `company-status/kanban.js`, `company-kanban` |
+| **Rekap kanban**: task kelar/gagal per hari, per staf, dan per model, plus biaya dan durasi | `company-usage`, `company-status/kanban.js` |
+| HASIL buat **agent selain Claude** (dari layar terminal), space di **mesin lain** (`hc machine`), dan **judul jendela** yang ikut isi kanban | `company-status` |
 | **`pixel-hq-task`**: tambah task ke kanban dari terminal, skrip, atau agent | `company-kanban/pixel-hq-task.*`, `install.sh`/`install.ps1` |
 | **Hotkey** `Ctrl+Shift+J` (Kanban) dan `Ctrl+Shift+M` (Usage), tampil juga di lembar HOTKEY | `install.sh`/`install.ps1` (`keys.json`), `company-hotkeys` |
 | Tombol **KANBAN** di bar atas dan status bar (dengan jumlah task jalan, nanya balik, ditahan, dan gagal) | `company-tabs`, `company-status` |
@@ -134,7 +138,8 @@ Buka lewat tombol **KANBAN** (bar atas = panel kanan, status bar = dialog lebar)
    - **PRIORITAS**: `tinggi` dikirim duluan kalau beberapa task nunggu staf yang sama,
    - **BATAS**: batas waktu kerja agent (10/30/60/120 menit), lalu **LEWAT BATAS**: `ingatkan` (notifikasi + kartu
      ditandai) atau `hentikan` (agent disuruh berhenti, kartu ditandai DIHENTIKAN). Waktu nunggu jawabanmu gak dihitung,
-   - **SETELAH**: task ini baru dikirim setelah task yang dipilih masuk Selesai.
+   - **SETELAH**: task ini baru dikirim setelah task yang dipilih masuk Selesai,
+   - **OPSI LAIN ▾**: CEK, BIAYA MAKS, BAWA HASIL, WORKTREE, JAM dan ULANG, dan TEMPLATE (lihat bawah).
 2. **+ TAMBAH** → masuk kolom **Antrean**.
 3. **KERJAKAN ▶** → pindah ke **Sedang dikerjakan**. Mesin (jalan tiap 3 detik selama Herdr terbuka):
    - mengirim `/model` dan `/effort` bila dipilih (hanya ke sesi Claude Code), lalu task-nya, lewat `hc send`,
@@ -156,12 +161,17 @@ Di tiap kartu: **▲ ▼** mengubah urutan (di antara kartu dengan prioritas sam
   Kartunya ditandai **DIHENTIKAN** (oranye, gak dihitung sebagai gagal), model/effort staf dikembalikan,
   dan **ULANGI** mengirimnya lagi.
 - **LIHAT ▸** membuka terminal staf yang pegang task itu (dialog kanban ditutup biar gak nutupin).
+- **DIFF ▸** (task yang kelar atau gagal, di repo git) membuka tab baru berisi perubahan file sejak task dikirim.
+  Kartunya juga menampilkan ringkasannya, mis. `± 3 file +120 −14 · 1 file baru`.
 
 **PERLU JAWABAN** (pink): kalau baris terakhir balasan agent berupa pertanyaan ("Mau pakai A atau B?"), kartunya
 gak dipindah ke Selesai. Kartu tetap di "Sedang dikerjakan", pertanyaannya tampil di kartu, dan muncul notifikasi.
-Klik **JAWAB ▸** buat buka terminalnya; setelah kamu jawab, mesin lanjut memantau seperti biasa. Kalau pertanyaannya
-cuma basa-basi ("Ada lagi yang bisa dibantu?"), klik **KELAR ✓**. Selama nunggu jawaban, task yang menunggu task ini
-ikut nunggu, staf itu gak dikasih task lain, dan model/effort-nya belum dikembalikan.
+**Jawab langsung dari kartu**: ketik di kotak jawabannya lalu Enter (atau **KIRIM ▸**), sama kayak ngetik di terminalnya.
+Kalau pertanyaannya punya pilihan, tombolnya muncul di atas kotak itu: pilihan bernomor ("1. … 2. …"), "A atau B?",
+atau **Ya, lanjut** / **Gak usah** buat pertanyaan ya/gak. Buat jawaban panjang, **TERMINAL ▸** membuka terminalnya.
+Setelah kamu jawab, mesin lanjut memantau seperti biasa. Kalau pertanyaannya cuma basa-basi ("Ada lagi yang bisa
+dibantu?"), klik **KELAR ✓**. Selama nunggu jawaban, task yang menunggu task ini ikut nunggu, staf itu gak dikasih
+task lain, dan model/effort-nya belum dikembalikan.
 
 **DITAHAN** (hijau toska): kalau usage Claude sesi 5 jam atau minggu ini sudah **95%** ke atas, task yang belum terkirim
 ke staf Claude ditunda, dengan catatan kapan usage-nya reset (mis. "dikirim setelah reset 14:00"). Task dikirim sendiri
@@ -169,8 +179,58 @@ setelah reset. **KIRIM AJA** mengirimnya sekarang juga. Staf selain Claude Code 
 (sumber angka usage-nya).
 
 **Task gagal** ditandai merah (kartu tetap di kolom "Sedang dikerjakan") kalau: pengiriman gagal 5 kali,
-stafnya hilang sebelum kelar, tab agent baru gak muncul dalam 1 menit, atau balasan agent berupa error
-(`API Error`, batas usage). Notifikasi muncul dan jumlahnya tampil di tombol KANBAN.
+stafnya hilang sebelum kelar, tab agent baru gak muncul dalam 1 menit, balasan agent berupa error
+(`API Error`, batas usage), atau CEK-nya masih gagal setelah 3 kali dibenerin. Notifikasi muncul dan jumlahnya tampil
+di tombol KANBAN.
+
+### OPSI LAIN
+
+- **CEK** (mis. `npm test`, `cargo test`, `make lint`): perintah yang dijalankan di folder agent setelah dia berhenti.
+  Kartunya ditandai **NGECEK** selama cek jalan. Lolos (kode keluar 0) = pindah ke Selesai dengan tanda `cek · lolos`.
+  Gagal = 60 baris terakhir output-nya dikirim balik ke agent ("Cek otomatis `npm test` gagal… perbaiki"), lalu dicek lagi
+  waktu dia berhenti. Sampai **3 kali** dibenerin; setelah itu kartunya gagal. **OUTPUT CEK** di kartu menampilkan
+  output terakhirnya. Cek jalan di belakang (sampai 10 menit), jadi task lain tetap jalan. Kalau kamu nyuruh agent
+  sesuatu waktu cek jalan, ceknya dibatalin dan diulang waktu dia berhenti lagi.
+  Linux/macOS: lewat `sh -c`. Windows: lewat PowerShell, atau lewat WSL kalau folder agent-nya jalur WSL.
+- **BIAYA MAKS** ($0.50/$1/$2/$5): sama kayak BATAS, tapi dari biaya task. **LEWAT BATAS** berlaku buat keduanya:
+  `ingatkan` atau `hentikan`.
+- **BAWA HASIL** (muncul kalau SETELAH dipilih): HASIL task yang ditunggu ditempel di bawah task ini waktu dikirim.
+  Contoh: "Bikin rencana migrasi" lalu "Kerjakan rencana ini" dengan BAWA HASIL.
+- **WORKTREE**: task dikerjain agent Claude baru di git worktree dan branch sendiri, jadi beberapa task bisa jalan bareng
+  di repo yang sama tanpa saling timpa. Branch-nya `kanban/<judul>-<id>`, foldernya `<repo>/../.worktrees/<repo>-kanban-…`
+  (sama dengan worktree crew Pixel HQ). Folder space-nya harus repo git. Kartunya menampilkan branch-nya; **FOLDER ▸**
+  membuka terminal di sana. Gabungkan branch-nya sendiri kalau udah oke. ULANGI memakai worktree yang sama; HAPUS gak
+  menghapus worktree atau branch-nya.
+- **JAM** (mis. `22:00`) dan **ULANG**: `sekali` = task nunggu di Antrean dengan tanda `⏰ mulai …`, lalu jalan sendiri
+  di jam itu. `tiap hari` / `hari kerja` (Sen–Jum) = jadi **JADWAL**: tiap jam itu salinannya dijalankan, jadwalnya
+  tetap di Antrean. **JALANKAN ▶** di kartu jadwal menjalankan salinannya sekarang juga. Kalau Herdr lagi tutup waktu
+  jamnya tiba, task jalan begitu Herdr dibuka (sekali aja). KERJAKAN ▶ di task berjadwal sekali = jalan sekarang,
+  jadwalnya batal.
+- **TEMPLATE**: **+ JADI TEMPLATE** menyimpan isian form (namanya = judul); **TEMPLATE ▾** mengisi form dari template
+  berikutnya; **HAPUS TEMPLATE** menghapus yang lagi dipilih. Disimpan di `~/.config/herdr-app/pixel-hq-kanban-templates.json`.
+
+Model, effort, CEK, BIAYA, dan WORKTREE tetap terpilih buat task berikutnya; JAM, ULANG, dan BAWA HASIL cuma buat
+task yang barusan ditambah.
+
+### Notifikasi ke HP
+
+Tombol **HP** di atas papan membuka pengaturannya. Isi alamatnya, lalu **SIMPAN** dan **TES**:
+
+- **ntfy** (paling gampang): pasang app ntfy di HP, langganan topik yang susah ditebak, lalu isi
+  `https://ntfy.sh/<topik>` (atau server ntfy sendiri).
+- **Discord** / **Slack**: URL webhook channel-nya.
+- **Telegram**: `https://api.telegram.org/bot<TOKEN>/sendMessage?chat_id=<ID>`.
+
+Yang dikirim: task kelar, nanya balik, gagal, dihentikan, dan lewat batas (judul task ikut terkirim ke layanan itu).
+Bawaannya cuma dikirim kalau jendela Herdr lagi gak kamu lihat; **KIRIM: selalu** mengirim tiap saat. Dikirim lewat
+`curl` (ada di Linux, macOS, dan Windows 10 ke atas). **MATIKAN** menghapus alamatnya.
+
+### Rekap
+
+**REKAP** di atas papan (atau tab **REKAP KANBAN** di dialog Usage) menampilkan task yang kelar dan gagal per hari,
+biaya, rata-rata durasi, CEK yang lolos, dan tabel per staf dan per model, buat 7, 30, atau 90 hari. Datanya dicatat
+mesin kanban tiap task kelar, gagal, atau dihentikan, di `~/.config/herdr-app/pixel-hq-kanban-history.json` (90 hari).
+**BERSIHKAN** di kolom Selesai gak menghapus rekap.
 
 **EKSPOR** menyimpan papan ke `pixel-hq-kanban-<waktu>.json` (bisa diimpor lagi) dan `.md` (buat dibaca)
 di folder yang kamu pilih. **IMPOR** mengambil task dari file JSON ekspor: task yang sudah ada gak didobel,
@@ -185,6 +245,9 @@ pixel-hq-task "Perbaiki tes yang gagal"                    # masuk Antrean
 pixel-hq-task -k "Update dependensi" -d "jangan major"     # langsung Sedang dikerjakan
 pixel-hq-task -k -s api -m sonnet -e high -p tinggi --batas 30 --hentikan "Review PR #12"
 git diff | pixel-hq-task -k -d - "Review perubahan ini"    # detail dari stdin
+pixel-hq-task -k --cek "npm test" --biaya 2 --hentikan "Perbaiki bug login"   # CEK dan batas biaya
+pixel-hq-task -k --worktree "Fitur export CSV"             # worktree dan branch sendiri
+pixel-hq-task --jam 09:00 --ulang kerja "Cek dependensi"   # jadwal tiap hari kerja jam 09:00
 pixel-hq-task -h                                           # semua pilihan
 ```
 
@@ -199,6 +262,8 @@ Windows (`pixel-hq-task.ps1`, pilihannya gaya PowerShell, boleh disingkat huruf 
 pixel-hq-task "Perbaiki tes yang gagal"
 pixel-hq-task -Kerjakan -Space api -Model sonnet -Batas 30 -Hentikan "Review PR #12"
 git diff | pixel-hq-task -K -Stdin "Review perubahan ini"
+pixel-hq-task -Kerjakan -Cek "npm test" -Biaya 2 -Worktree "Perbaiki bug login"
+pixel-hq-task -Jam 09:00 -Ulang kerja "Cek dependensi"
 ```
 
 Yang update lewat tombol update (bukan `install.sh`) belum punya perintah `pixel-hq-task` di PATH: jalankan installer
@@ -208,7 +273,14 @@ sekali lagi, atau panggil langsung `python3 ~/.config/herdr-app/mods/company-kan
 - Model dikembalikan lewat alias (`opus`, `sonnet`, …) dari nama model yang dilaporkan statusline.
   Kalau sebelumnya kamu pakai versi model tertentu, hasilnya bisa versi terbaru dari keluarga yang sama.
 - Hasil kerja butuh hook aktivitas terpasang (otomatis lewat `install.sh`/`install.cmd`) dan Claude Code.
-  Begitu juga PERLU JAWABAN, yang membaca hasil kerja itu.
+  Begitu juga PERLU JAWABAN, yang membaca hasil kerja itu. Agent selain Claude Code (Codex, dll.), atau Claude yang
+  hook-nya gak kebaca dalam 20 detik, dapat HASIL dari baris terakhir layar terminalnya (`hc read`), bertanda
+  "dari layar terminal". HASIL dari layar gak dipakai buat PERLU JAWABAN, karena isinya bisa kecampur prompt.
+- **Space di mesin lain** (`hc machine`, mis. VPS): task dikirim dan dipantau seperti biasa. HASIL dan PERLU JAWABAN
+  dibaca dari `~/.local/state/pixel-hq/last/` di mesin itu (pasang Pixel HQ di sana juga biar hook-nya ada), kalau gak ada
+  dari layar terminalnya. CEK dan DIFF juga jalan di mesin itu. Angka usage (DITAHAN) tetap dari komputer ini.
+- DIFF dihitung dari `git stash create` waktu task dikirim: perubahan yang belum di-commit sebelum task gak ikut terhitung,
+  dan gak ada yang diubah di repo (gak ada stash, commit, atau index yang berubah). File baru dihitung terpisah.
 - Biaya/token per task dihitung dari angka sesi staf. Kalau di staf yang sama kamu ngetik sendiri selama task jalan,
   pemakaian itu ikut terhitung ke task-nya.
 - Papan bisa diubah dari dialog waktu mesinnya lagi nulis. Keduanya saling menunggu dan menggabungkan perubahan,
@@ -227,6 +299,10 @@ sekali lagi, atau panggil langsung `python3 ~/.config/herdr-app/mods/company-kan
   Bisa juga dibuka dari palet perintah: "Usage Claude".
 
 Riwayat mulai terkumpul setelah dipasang, jadi grafiknya baru terisi setelah beberapa jam pemakaian.
+Tab **REKAP KANBAN** di dialog yang sama berisi rekap task kanban (lihat [Rekap](#rekap)).
+
+**Judul jendela** Herdr ikut isi kanban dan space yang dibuka, mis. `2 jalan · 1 nanya — api · Pixel HQ`, jadi kelihatan
+dari taskbar, alt-tab, atau pencatat waktu (ActivityWatch dan sejenisnya).
 
 ![Status bar](docs/statusbar.png)
 
@@ -305,7 +381,8 @@ Tiap push dan pull request menjalankan [GitHub Actions](.github/workflows/tes.ym
 - **Linux**:
   - pemeriksaan repo (`tests/check_repo.py`): daftar file updater cocok dengan isi repo, skrip Windows ASCII,
     JSON valid, `state.js` kedua mod sama,
-  - tes JavaScript mod di gjs (`tests/run-js.sh`): mesin kanban, baca state dari WSL, dialog kanban, updater,
+  - tes JavaScript mod di gjs (`tests/run-js.sh`): mesin kanban (termasuk CEK, jadwal, worktree, diff, notifikasi HP,
+    rekap, mesin lain), baca state dari WSL, dialog kanban, updater,
   - pasang dan copot di home tiruan (`tests/linux-install.sh`): install, statusLine, hook Stop, `pixel-hq-task`,
     doctor, `--restore`, `--purge`.
 - **Windows** (Windows PowerShell 5.1 di runner Windows GitHub, `tests/windows.ps1`):
@@ -336,6 +413,9 @@ docs/                     gambar README
 - Installer Windows diuji di Windows 11 (PowerShell 5.1) dengan folder home tiruan: backup, salin mod, statusLine, dan hook
   (termasuk lewat Git Bash, cmd, dan PowerShell), tapi belum di sesi Claude Code sungguhan.
 - **Versi Windows untuk HASIL kerja, riwayat usage, token/biaya per staf, hotkey, `pixel-hq-task.ps1`, dan `uninstall.ps1` belum dicoba di Windows.**
+- Fitur 2.3 (CEK, worktree, diff, notifikasi HP, rekap, mesin lain) diuji lewat tes otomatis dan tampilan dialognya dicek
+  di Herdr Linux, tapi belum dipakai seharian. Di Windows dengan Claude Code di WSL, DIFF dan WORKTREE belum jalan
+  (git-nya dipanggil dari sisi Windows); CEK jalan lewat `wsl.exe` di distro bawaan.
   Kodenya mengikuti versi Linux, tapi belum pernah dijalankan di PowerShell. Kalau ada yang error, kabari lewat issue.
 - Di Windows, sebagian fitur bawaan Pixel HQ yang memakai `sh`/`python3` (worktree crew, plugin Hermes,
   vitals Codex/Antigravity) tetap butuh alat itu; installer ini tidak mengubahnya.

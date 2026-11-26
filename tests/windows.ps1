@@ -163,6 +163,18 @@ try {
   Check 'pixel-hq-task dari PATH, yang udah diambil dibuang' ($r.code -eq 0 -and $list.Count -eq 2 -and $list[0].title -eq 'Kedua' -and $list[1].title -eq 'Ketiga') "$($r.out)`n$($r.err)`n$raw"
   $r = Invoke-Tool $shim @('-Model', 'gpt', 'x')
   Check 'model salah ditolak (exit 2)' ($r.code -eq 2) $r
+  # pilihan 2.3: cek, batas biaya, worktree, jadwal
+  $r = Invoke-Tool $shim @('-Cek', 'npm test', '-Biaya', '1.5', '-Hentikan', '-Worktree', '-Jam', '7:30', '-Ulang', 'kerja', 'Keempat')
+  $raw = [System.IO.File]::ReadAllText($inbox, $utf8)
+  $list = @(ConvertFrom-Json -InputObject $raw | ForEach-Object { $_ })
+  $last = $list[$list.Count - 1]
+  Check 'pixel-hq-task -Cek -Biaya -Hentikan -Worktree -Jam -Ulang' ($r.code -eq 0 -and $last.title -eq 'Keempat' -and $last.check -eq 'npm test' -and $last.costMax -eq 1.5 -and $last.limitStop -eq $true -and $last.worktree -eq $true -and $last.atTime -eq '07:30' -and $last.repeat -eq 'kerja' -and $last.column -eq 'todo') "$($r.out)`n$($r.err)`n$raw"
+  $r = Invoke-Tool $shim @('-Kerjakan', '-Jam', '09:00', 'x')
+  Check '-Kerjakan bareng -Jam ditolak (exit 2)' ($r.code -eq 2) $r
+  $r = Invoke-Tool $shim @('-Hentikan', 'x')
+  Check '-Hentikan tanpa -Batas/-Biaya ditolak (exit 2)' ($r.code -eq 2) $r
+  $r = Invoke-Tool $shim @('-Jam', '25:00', 'x')
+  Check '-Jam salah ditolak (exit 2)' ($r.code -eq 2) $r
 
   Write-Host '== doctor'
   $r = Invoke-Ps (Join-Path $Cfg 'mods\company-agents\pixel-hq-doctor.ps1')
@@ -186,13 +198,15 @@ try {
   Write-Host '== uninstall.cmd -Purge'
   $r = Invoke-Ps (Join-Path $Root 'install.ps1')
   Check 'pasang lagi keluar 0' ($r.code -eq 0) $r
+  [System.IO.File]::WriteAllText((Join-Path $Cfg 'pixel-hq-kanban-history.json'), '{"v":1,"runs":[]}', $utf8)
+  [System.IO.File]::WriteAllText((Join-Path $Cfg 'pixel-hq-kanban-templates.json'), '{"templates":[]}', $utf8)
   $r = Invoke-Tool (Join-Path $Root 'uninstall.cmd') @('-Purge') $utf8.GetBytes("`r`n")
   Check 'uninstall.cmd -Purge keluar 0' ($r.code -eq 0) $r
   Check 'mod, layout, tema dihapus' ((@(Get-ChildItem (Join-Path $Cfg 'mods') -Directory -Filter 'company-*' -ErrorAction SilentlyContinue).Count -eq 0) -and -not (Test-Path (Join-Path $Cfg 'layouts\pixel-hq.json')) -and -not (Test-Path (Join-Path $Cfg 'themes\pixel-hq.json')))
   $s = Read-Json $Settings
   Check 'statusLine dan hook Pixel HQ dicabut, hook punyamu tetap' (-not (Has-Prop $s 'statusLine') -and ((Hook-Commands $s 'Stop') -join '|') -eq 'echo punyaku') ([System.IO.File]::ReadAllText($Settings))
   Check 'hotkey dicabut' (-not (Has-Prop (Read-Json (Join-Path $Cfg 'keys.json')) 'layout:pixel-hq'))
-  Check 'data dihapus' (-not (Test-Path $inbox) -and -not (Test-Path (Join-Path $Cfg 'pixel-hq-kanban.json')) -and -not (Test-Path $StateDir))
+  Check 'data dihapus (termasuk rekap dan template)' (-not (Test-Path $inbox) -and -not (Test-Path (Join-Path $Cfg 'pixel-hq-kanban.json')) -and -not (Test-Path $StateDir) -and -not (Test-Path (Join-Path $Cfg 'pixel-hq-kanban-history.json')) -and -not (Test-Path (Join-Path $Cfg 'pixel-hq-kanban-templates.json')))
   Check 'pixel-hq-task dicopot' (-not (Test-Path $shim))
   Check 'backup sebelum copot dibuat' (@(Get-ChildItem (Join-Path $F 'backups\herdr') -Filter 'sebelum-uninstall-pixelhq-*.zip').Count -ge 1)
 } catch {

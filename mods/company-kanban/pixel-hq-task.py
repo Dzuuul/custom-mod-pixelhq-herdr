@@ -5,6 +5,8 @@
   pixel-hq-task -k "Judul" -d "detail"            langsung Sedang dikerjakan (dikirim ke staf yang nganggur)
   pixel-hq-task -s api -m sonnet -e high -p tinggi --batas 30 --hentikan "Judul"
   git diff | pixel-hq-task -k -d - "Review perubahan ini"    detail dibaca dari stdin
+  pixel-hq-task -k --cek "npm test" --biaya 2 --worktree "Judul"   cek setelah kelar, batas biaya, worktree sendiri
+  pixel-hq-task --jam 09:00 --ulang kerja "Cek dependensi"   jadwal tiap hari kerja jam 09:00
 
 Space: --space NAMA. Kalau gak diisi: space terminal Herdr tempat perintah ini jalan, kalau bukan di Herdr: space
 yang lagi dibuka. Task ditulis ke pixel-hq-kanban-inbox.json di folder Herdr; mesin kanban (status bar Pixel HQ)
@@ -15,6 +17,7 @@ import argparse
 import json
 import os
 import random
+import re
 import sys
 import time
 
@@ -61,7 +64,13 @@ def main(argv=None) -> int:
     ap.add_argument("-e", "--effort", choices=EFFORTS)
     ap.add_argument("-p", "--prioritas", choices=["tinggi", "normal", "rendah"], default="normal")
     ap.add_argument("--batas", type=int, metavar="MENIT", help="batas waktu (1-1440 menit)")
-    ap.add_argument("--hentikan", action="store_true", help="lewat batas = agent dihentikan (butuh --batas)")
+    ap.add_argument("--hentikan", action="store_true", help="lewat batas waktu/biaya = agent dihentikan (butuh --batas atau --biaya)")
+    ap.add_argument("-c", "--cek", default="", metavar="PERINTAH",
+                    help="dijalankan di folder agent setelah dia berhenti, mis. 'npm test'; gagal = agent disuruh benerin (sampai 3x)")
+    ap.add_argument("--biaya", type=float, metavar="USD", help="batas biaya task dalam dolar, mis. 1.5")
+    ap.add_argument("-w", "--worktree", action="store_true", help="dikerjain agent baru di git worktree dan branch sendiri")
+    ap.add_argument("--jam", metavar="HH:MM", help="jam mulai: task nunggu di Antrean sampai jam itu")
+    ap.add_argument("--ulang", choices=["harian", "kerja"], help="jadikan jadwal: tiap hari, atau hari kerja (Sen-Jum), di --jam")
     a = ap.parse_args(argv)
 
     title = a.judul.strip()
@@ -70,8 +79,20 @@ def main(argv=None) -> int:
     detail = sys.stdin.read() if a.detail == "-" else a.detail
     if a.batas is not None and not 1 <= a.batas <= 1440:
         ap.error("--batas harus 1 sampai 1440 menit")
-    if a.hentikan and a.batas is None:
-        ap.error("--hentikan butuh --batas")
+    if a.biaya is not None and not 0.01 <= a.biaya <= 1000:
+        ap.error("--biaya harus 0.01 sampai 1000 dolar")
+    if a.hentikan and a.batas is None and a.biaya is None:
+        ap.error("--hentikan butuh --batas atau --biaya")
+    jam = None
+    if a.jam is not None:
+        m = re.fullmatch(r"\s*(\d{1,2})[:.](\d{2})\s*", a.jam)
+        if not m or int(m.group(1)) > 23 or int(m.group(2)) > 59:
+            ap.error("--jam pakai format HH:MM, mis. 22:00")
+        jam = "%02d:%s" % (int(m.group(1)), m.group(2))
+    if a.ulang and not jam:
+        ap.error("--ulang butuh --jam")
+    if jam and a.kerjakan:
+        ap.error("--kerjakan gak bisa bareng --jam (task berjadwal nunggu di Antrean sampai jamnya)")
 
     cfg = herdr_home()
     if not os.path.isdir(cfg):
@@ -94,8 +115,18 @@ def main(argv=None) -> int:
         entry["priority"] = a.prioritas
     if a.batas is not None:
         entry["limitMin"] = a.batas
-        if a.hentikan:
-            entry["limitStop"] = True
+    if a.biaya is not None:
+        entry["costMax"] = round(a.biaya, 2)
+    if a.hentikan:
+        entry["limitStop"] = True
+    if a.cek.strip():
+        entry["check"] = a.cek.strip()[:500]
+    if a.worktree:
+        entry["worktree"] = True
+    if jam:
+        entry["atTime"] = jam
+        if a.ulang:
+            entry["repeat"] = a.ulang
 
     inbox = os.path.join(cfg, "pixel-hq-kanban-inbox.json")
     with open(inbox + ".lock", "a") as lock:
@@ -118,7 +149,11 @@ def main(argv=None) -> int:
             fh.write("\n")
         os.replace(tmp, inbox)
     where = "Sedang dikerjakan" if a.kerjakan else "Antrean"
-    print(f"Task masuk {where}: {title}")
+    if jam:
+        when = {"harian": "tiap hari", "kerja": "tiap hari kerja"}.get(a.ulang, "sekali")
+        print(f"Task dijadwalkan jam {jam} ({when}): {title}")
+    else:
+        print(f"Task masuk {where}: {title}")
     print("Herdr mengambilnya dalam beberapa detik (kalau Herdr lagi tutup, waktu dibuka lagi).")
     return 0
 

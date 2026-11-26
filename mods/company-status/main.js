@@ -2,7 +2,7 @@ import { readState } from "./state.js";
 import { View, div, svg } from "gpui-kit";
 import { KanbanEngine } from "./kanban.js";
 import { h_flex } from "gpui-base";
-import { spaces, panes, focused, agents, theme, run, window, keys, setBadge, openOverlay, shared, home, checking, readTextFile, notify } from "herdr";
+import { spaces, panes, focused, agents, theme, run, window, keys, setBadge, setWindowTitle, openOverlay, shared, home, checking, readTextFile, notify } from "herdr";
 
 const MONO = "JetBrains Mono, Menlo, monospace";
 
@@ -115,8 +115,20 @@ export default class WorkspaceStatus extends View {
   // Isi chip KANBAN: yang jalan (atau antrean), lalu yang perlu kamu urus: nanya balik, ditahan usage, gagal.
   kanbanText() {
     const c = this.kb?.counts ?? {};
-    return ["KANBAN", c.doing ? `${c.doing} JALAN` : c.todo ? String(c.todo) : "", c.asking ? `${c.asking} NANYA` : "",
+    return ["KANBAN", c.doing ? `${c.doing} JALAN` : c.todo ? String(c.todo) : "", c.checking ? `${c.checking} DICEK` : "", c.asking ? `${c.asking} NANYA` : "",
       c.held ? `${c.held} DITAHAN` : "", c.failed ? `${c.failed} GAGAL` : ""].filter(Boolean).join(" · ");
+  }
+
+  // Judul jendela (taskbar, alt-tab, pencatat waktu): yang lagi jalan dan yang nunggu kamu, lalu space yang dibuka.
+  // Mis. "2 jalan · 1 nanya — api · Pixel HQ". Cuma dipasang kalau isinya berubah.
+  windowTitle(space, blocked) {
+    const c = this.kb?.counts ?? {};
+    const parts = [c.doing && `${c.doing} jalan`, c.checking && `${c.checking} dicek`, c.asking && `${c.asking} nanya`, c.held && `${c.held} ditahan`,
+      c.failed && `${c.failed} gagal`, blocked && `${blocked} nunggu kamu`].filter(Boolean);
+    const title = `${parts.length ? `${parts.join(" · ")} — ` : ""}${space?.name ? `${space.name} · ` : ""}Pixel HQ`;
+    if (title === this.winTitle || checking()) return;
+    this.winTitle = title;
+    try { setWindowTitle(title); } catch {}
   }
 
   hint(t) {
@@ -141,6 +153,7 @@ export default class WorkspaceStatus extends View {
       this.badge = wants;
       try { setBadge(wants); } catch { this.badge = undefined; }
     }
+    this.windowTitle(space, n("blocked"));
     const label = (icon, text) => h_flex().gap(6).items_center().child(svg(`mods/company-status/${icon}.svg`).size(13)).child(text.toUpperCase());
     const pill = (color, text) => h_flex().gap(6).items_center().child(div().size(6).bg(color)).child(text.toUpperCase());
     return h_flex().size_full().px(14).gap(14).items_center().bg(t.chrome).border_t(1).border_color(t.surface).font_family(MONO).text_size(11).text_color(t.muted)

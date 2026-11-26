@@ -3,11 +3,14 @@
 #   pixel-hq-task -Kerjakan "Judul" -Detail "detail"             langsung Sedang dikerjakan (dikirim ke staf yang nganggur)
 #   pixel-hq-task -Space api -Model sonnet -Effort high -Prioritas tinggi -Batas 30 -Hentikan "Judul"
 #   git diff | pixel-hq-task -Kerjakan -Stdin "Review perubahan ini"     detail dibaca dari stdin
+#   pixel-hq-task -Kerjakan -Cek "npm test" -Biaya 2 -Worktree "Judul"   cek setelah kelar, batas biaya, worktree sendiri
+#   pixel-hq-task -Jam 09:00 -Ulang kerja "Cek dependensi"              jadwal tiap hari kerja jam 09:00
 # Bukan "-Detail -" seperti versi Linux: powershell.exe -File (yang dipakai pixel-hq-task.cmd) gak bisa menerima
 # argumen "-" sendirian, prosesnya langsung keluar dengan kode 5 tanpa pesan sebelum skrip ini jalan.
 # Kalau skrip ini dipanggil langsung dari PowerShell, "-Detail -" tetap diterima.
 # Nama pilihan boleh disingkat: -K, -D, -S, -M, -E, -P, -B, -H. Singkatannya alias tetap: tanpa itu -D, -E, dan -P
 # bentrok dengan -Debug, -ErrorAction, dan -PipelineVariable bawaan PowerShell.
+# Pilihan 2.3 (-Cek, -Biaya, -Worktree, -Jam, -Ulang) ditulis lengkap: -W bentrok dengan -WarningAction.
 # Sama dengan pixel-hq-task.py: cuma menulis pixel-hq-kanban-inbox.json di folder Herdr; mesin kanban (status bar
 # Pixel HQ) mengambilnya dalam beberapa detik, atau waktu Herdr dibuka lagi. Papan kanban sendiri gak disentuh.
 # File ini sengaja ASCII saja: Windows PowerShell 5.1 membaca skrip tanpa BOM sebagai ANSI.
@@ -21,15 +24,23 @@ param(
   [Alias('P')][string]$Prioritas = 'normal',
   [Alias('B')][int]$Batas = 0,
   [Alias('H')][switch]$Hentikan,
-  [switch]$Stdin
+  [switch]$Stdin,
+  [string]$Cek = '',
+  [double]$Biaya = 0,
+  [switch]$Worktree,
+  [string]$Jam = '',
+  [string]$Ulang = ''
 )
 $ErrorActionPreference = 'Stop'
 
 function Show-Usage {
   Write-Host 'pakai: pixel-hq-task [-Kerjakan] [-Detail TEKS | -Stdin] [-Space NAMA] [-Model opus|sonnet|haiku|fable]'
   Write-Host '                     [-Effort low|medium|high|xhigh|max] [-Prioritas tinggi|normal|rendah]'
-  Write-Host '                     [-Batas MENIT [-Hentikan]] "Judul task"'
+  Write-Host '                     [-Batas MENIT] [-Biaya USD] [-Hentikan] [-Cek PERINTAH] [-Worktree]'
+  Write-Host '                     [-Jam HH:MM [-Ulang harian|kerja]] "Judul task"'
   Write-Host 'Tanpa -Space: space terminal Herdr tempat perintah ini jalan, kalau bukan di Herdr: space yang lagi dibuka.'
+  Write-Host '-Cek: dijalankan di folder agent setelah dia berhenti (mis. "npm test"); gagal = agent disuruh benerin, sampai 3x.'
+  Write-Host '-Hentikan: lewat batas waktu/biaya = agent dihentikan. -Worktree: agent baru di git worktree dan branch sendiri.'
 }
 function Stop-Usage([string]$msg) { Write-Host "pixel-hq-task: $msg" -ForegroundColor Red; Show-Usage; exit 2 }
 
@@ -41,7 +52,16 @@ if ($Model -and $Model -notin $Models) { Stop-Usage "model '$Model' gak dikenal 
 if ($Effort -and $Effort -notin $Efforts) { Stop-Usage "effort '$Effort' gak dikenal (pilih: $($Efforts -join ', '))" }
 if ($Prioritas -notin @('tinggi', 'normal', 'rendah')) { Stop-Usage "prioritas '$Prioritas' gak dikenal (pilih: tinggi, normal, rendah)" }
 if ($PSBoundParameters.ContainsKey('Batas') -and ($Batas -lt 1 -or $Batas -gt 1440)) { Stop-Usage '-Batas harus 1 sampai 1440 menit' }
-if ($Hentikan -and -not $PSBoundParameters.ContainsKey('Batas')) { Stop-Usage '-Hentikan butuh -Batas' }
+if ($PSBoundParameters.ContainsKey('Biaya') -and ($Biaya -lt 0.01 -or $Biaya -gt 1000)) { Stop-Usage '-Biaya harus 0.01 sampai 1000 dolar' }
+if ($Hentikan -and -not $PSBoundParameters.ContainsKey('Batas') -and -not $PSBoundParameters.ContainsKey('Biaya')) { Stop-Usage '-Hentikan butuh -Batas atau -Biaya' }
+$clock = ''
+if ($Jam) {
+  if ($Jam -notmatch '^\s*(\d{1,2})[:.](\d{2})\s*$' -or [int]$Matches[1] -gt 23 -or [int]$Matches[2] -gt 59) { Stop-Usage '-Jam pakai format HH:MM, mis. 22:00' }
+  $clock = ('{0:D2}:{1}' -f [int]$Matches[1], $Matches[2])
+}
+if ($Ulang -and $Ulang -notin @('harian', 'kerja')) { Stop-Usage "ulang '$Ulang' gak dikenal (pilih: harian, kerja)" }
+if ($Ulang -and -not $clock) { Stop-Usage '-Ulang butuh -Jam' }
+if ($clock -and $Kerjakan) { Stop-Usage '-Kerjakan gak bisa bareng -Jam (task berjadwal nunggu di Antrean sampai jamnya)' }
 if ($Stdin -and $Detail -and $Detail -ne '-') { Stop-Usage 'pilih salah satu: -Detail TEKS atau -Stdin' }
 # stdin dibaca sebagai UTF-8 dari aliran mentahnya (gak tergantung code page konsol), sama dengan statusLine dan hook
 if ($Stdin -or $Detail -eq '-') {
@@ -74,7 +94,13 @@ if ($env:HC_TERMINAL_ID) { $entry['fromTerminal'] = $env:HC_TERMINAL_ID }
 if ($Model) { $entry['model'] = $Model }
 if ($Effort) { $entry['effort'] = $Effort }
 if ($Prioritas -ne 'normal') { $entry['priority'] = $Prioritas }
-if ($PSBoundParameters.ContainsKey('Batas')) { $entry['limitMin'] = $Batas; if ($Hentikan) { $entry['limitStop'] = $true } }
+if ($PSBoundParameters.ContainsKey('Batas')) { $entry['limitMin'] = $Batas }
+if ($PSBoundParameters.ContainsKey('Biaya')) { $entry['costMax'] = [Math]::Round($Biaya, 2) }
+if ($Hentikan) { $entry['limitStop'] = $true }
+$c = $Cek.Trim()
+if ($c) { $entry['check'] = $(if ($c.Length -gt 500) { $c.Substring(0, 500) } else { $c }) }
+if ($Worktree) { $entry['worktree'] = $true }
+if ($clock) { $entry['atTime'] = $clock; if ($Ulang) { $entry['repeat'] = $Ulang } }
 
 $inbox = Join-Path $Cfg 'pixel-hq-kanban-inbox.json'
 # kunci biar dua perintah barengan gak saling timpa
@@ -121,6 +147,11 @@ try {
   $lock.Dispose()
 }
 $where = if ($Kerjakan) { 'Sedang dikerjakan' } else { 'Antrean' }
-Write-Host "Task masuk ${where}: $title"
+if ($clock) {
+  $when = if ($Ulang -eq 'harian') { 'tiap hari' } elseif ($Ulang -eq 'kerja') { 'tiap hari kerja' } else { 'sekali' }
+  Write-Host "Task dijadwalkan jam $clock (${when}): $title"
+} else {
+  Write-Host "Task masuk ${where}: $title"
+}
 Write-Host 'Herdr mengambilnya dalam beberapa detik (kalau Herdr lagi tutup, waktu dibuka lagi).'
 exit 0

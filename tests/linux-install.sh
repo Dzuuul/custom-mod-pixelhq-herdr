@@ -48,6 +48,12 @@ printf 'isi detail' | run "$F/.local/bin/pixel-hq-task" -d - "Kedua" > /dev/null
 check "dua task masuk inbox" 'js "$CFG/pixel-hq-kanban-inbox.json" "len(d) == 2 and d[0][\"column\"] == \"doing\" and d[0][\"model\"] == \"sonnet\" and d[0][\"limitStop\"] is True and d[1][\"detail\"] == \"isi detail\""'
 run "$F/.local/bin/pixel-hq-task" -m gpt "x" > /dev/null 2>&1; rc=$?
 check "model salah ditolak" '[ $rc -eq 2 ]'
+run "$F/.local/bin/pixel-hq-task" --cek "npm test" --biaya 1.5 --hentikan -w --jam 7:30 --ulang kerja "Ketiga" > /dev/null
+check "pilihan 2.3: cek, biaya, worktree, jadwal" 'js "$CFG/pixel-hq-kanban-inbox.json" "d[-1][\"title\"] == \"Ketiga\" and d[-1][\"check\"] == \"npm test\" and d[-1][\"costMax\"] == 1.5 and d[-1][\"limitStop\"] is True and d[-1][\"worktree\"] is True and d[-1][\"atTime\"] == \"07:30\" and d[-1][\"repeat\"] == \"kerja\" and d[-1][\"column\"] == \"todo\""'
+run "$F/.local/bin/pixel-hq-task" -k --jam 09:00 "x" > /dev/null 2>&1; rc=$?
+check "--kerjakan bareng --jam ditolak" '[ $rc -eq 2 ]'
+run "$F/.local/bin/pixel-hq-task" --hentikan "x" > /dev/null 2>&1; rc=$?
+check "--hentikan tanpa batas ditolak" '[ $rc -eq 2 ]'
 
 echo "== doctor"
 run python3 -I "$CFG/mods/company-agents/pixel-hq-doctor.py" > "$F/doctor.log" 2>&1; rc=$?
@@ -67,12 +73,13 @@ check "pixel-hq-task dicopot" '[ ! -e "$F/.local/bin/pixel-hq-task" ]'
 
 echo "== uninstall.sh --purge"
 run sh "$ROOT/install.sh" > /dev/null 2>&1
+printf '{"v":1,"runs":[]}' > "$CFG/pixel-hq-kanban-history.json"; printf '{"templates":[]}' > "$CFG/pixel-hq-kanban-templates.json"
 run sh "$ROOT/uninstall.sh" --purge > "$F/uninstall.log" 2>&1; rc=$?
 check "uninstall keluar 0" '[ $rc -eq 0 ] || { cat "$F/uninstall.log"; false; }'
 check "mod, layout, tema dihapus" '! ls -d "$CFG"/mods/company-* >/dev/null 2>&1 && [ ! -e "$CFG/layouts/pixel-hq.json" ] && [ ! -e "$CFG/themes/pixel-hq.json" ]'
 check "statusLine dan hook Pixel HQ dicabut, hook punyamu tetap" 'js "$F/.claude/settings.json" "\"statusLine\" not in d and [h[\"command\"] for g in d[\"hooks\"][\"Stop\"] for h in g[\"hooks\"]] == [\"echo punyaku\"]"'
 check "hotkey dicabut" 'js "$CFG/keys.json" "\"layout:pixel-hq\" not in d"'
-check "data dihapus" '[ ! -e "$CFG/pixel-hq-kanban-inbox.json" ] && [ ! -e "$F/.local/state/pixel-hq" ]'
+check "data dihapus (termasuk rekap dan template)" '[ ! -e "$CFG/pixel-hq-kanban-inbox.json" ] && [ ! -e "$F/.local/state/pixel-hq" ] && [ ! -e "$CFG/pixel-hq-kanban-history.json" ] && [ ! -e "$CFG/pixel-hq-kanban-templates.json" ]'
 check "pixel-hq-task dicopot" '[ ! -e "$F/.local/bin/pixel-hq-task" ]'
 
 echo
