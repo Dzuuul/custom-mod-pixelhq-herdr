@@ -3,7 +3,7 @@
 
 import { View, div, svg, image } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
-import { agents, terminals, panes, focused, spaces, run, theme, shared, setShared, setAgentOrder, settings, openOverlay, closeOverlay, props, window, layout, appHome, exec, readTextFile, writeTextFile, nextCommand, hc, knownAgents, checking } from "herdr";
+import { agents, terminals, panes, focused, spaces, run, theme, shared, setShared, setAgentOrder, settings, notify, openOverlay, closeOverlay, props, window, layout, appHome, exec, readTextFile, writeTextFile, nextCommand, hc, knownAgents, checking } from "herdr";
 import { figureFor, load } from "./figures.js";
 import { agentOf, speciesOf, duckWidth, duckMood, mood, DUCK_CENTER, IDLE_SNOOZE, IDLE_URGE } from "./duck.js";
 import { scene, sceneLayout, yHorizon } from "./scene.js";
@@ -13,6 +13,8 @@ import { assignNames } from "./names.js";
 import { snapshot, clashes, hire, agentTaskArgv } from "./crew.js";
 import { readState } from "./state.js";
 import { teamKey, wslDistro, rememberTeam, openSpec, addTopic, pushHistory, standupText, spent } from "./team.js";
+import { contextAlerts } from "./tools.js";
+import { Panels, PANEL_SIZE, mergeProjects } from "./panels.js";
 
 // The figure editor, as a dialog; `space` opens it on that space's pick.
 const openFigures = (space) => openOverlay({ mod: "company-agents", kind: "dialog", frame: "none", width: 860, height: 640, props: { figures: true, ...(space ? { space } : {}) } });
@@ -353,6 +355,11 @@ export default class Agents extends View {
       cx.timer.every(2000, load);
       return;
     }
+    if (props()?.panel) {
+      const projects = async () => mergeProjects(await this.readTeam(), this.liveTeam().flatMap((x) => (x.entry && !x.a.address.includes("/") ? [x.entry] : [])));
+      this.panels = new Panels(props(), projects, cx);
+      return;
+    }
     if (props()?.needsYou || props()?.workload || props()?.today) return;
     if (props()?.sortMenu) return;
     if (props()?.figures) { this.editor = new Editor(cx); return; }
@@ -427,7 +434,7 @@ export default class Agents extends View {
     this.scanCodex(cx);
     cx.timer.every(8000, (cx) => this.scanCodex(cx));
     // `company-agents.hire` (a key binding, or herdr-app do) opens the hire form.
-    cx.spawn(async (cx) => { for (;;) { const c = await nextCommand(); if (c === "hire") this.openHire(cx); if (c === "update") this.runUpdate(); if (c === "needsYou") this.openNeedsYou(); } });
+    cx.spawn(async (cx) => { for (;;) { const c = await nextCommand(); if (c === "hire") this.openHire(cx); if (c === "update") this.runUpdate(); if (c === "needsYou") this.openNeedsYou(); if (c === "pastePrompt") this.pastePrompt(cx); } });
     // OpenCode 1.x does not report a status by itself, so without help it never gets a desk. Once, if OpenCode is installed, drop its
     // status plugin (this mod's opencode-status.js) into OpenCode's plugins folder. Only ever replaces Pixel HQ's own older copy;
     // deleting the file removes it for good.
@@ -489,6 +496,8 @@ export default class Agents extends View {
     setShared("pixel-hq.history", this.history);
     // Daftar tim (proyek yang pernah dikerjakan) buat tombol TIM.
     if (!checking()) cx.timer.every(10000, (cx) => cx.spawn(async () => { await this.saveTeam().catch(() => {}); }));
+    this.contextWarned = new Set();
+    if (!checking()) cx.timer.every(15000, () => this.warnContext());
     if (JSON.stringify(shared("pixel-hq.today")) !== JSON.stringify(this.today)) setShared("pixel-hq.today", this.today);
     // The clock on the wall and the sky in the windows: one redraw a minute.
     cx.timer.every(60000, (cx) => cx.notify());
@@ -541,15 +550,66 @@ export default class Agents extends View {
   // Notifikasi sistem, dipanggil waktu jendela Herdr gak di depan (notifikasi bawaan Herdr cuma di dalam aplikasi).
   // Isinya cuma nama staf dan proyek.
   desktopNotify(a, needsYou) {
+    const { who, folder } = this.whoWhere(a);
+    this.systemToast(needsYou ? `${who} nunggu jawaban kamu` : `${who} udah kelar`, folder ? `Proyek ${folder}` : "Pixel HQ");
+  }
+
+  whoWhere(a) {
+    return {
+      who: (shared("pixel-hq.names") ?? {})[a.pane]?.name ?? a.space_name ?? a.program?.name ?? a.address,
+      folder: foldersOf([a], terminals(), panes()).get(a.address),
+    };
+  }
+
+  systemToast(title, body) {
     if (checking()) return;
-    const who = (shared("pixel-hq.names") ?? {})[a.pane]?.name ?? a.space_name ?? a.program?.name ?? a.address;
-    const folder = foldersOf([a], terminals(), panes()).get(a.address);
-    const title = needsYou ? `${who} nunggu jawaban kamu` : `${who} udah kelar`;
-    const body = folder ? `Proyek ${folder}` : "Pixel HQ";
     const sent = window().platform === "windows"
       ? exec("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", `${appHome()}/mods/company-agents/pixel-hq-notify.ps1`, "-Title", title, "-Body", body], { timeout: 15000 })
       : exec("notify-send", ["--app-name=Pixel HQ", "--", title, body], { timeout: 5000 });
     sent.catch(() => {}); // tanpa notify-send / notifikasi dimatikan: biarin
+  }
+
+  // Konteks staf hampir penuh: kasih tahu sekali, biar sempat /compact (tumpukan kertas di mejanya).
+  warnContext() {
+    const labels = new Map(terminals().map((k) => [k.address, k.labels ?? {}]));
+    const list = agents();
+    const items = list.map((a) => {
+      const L = labels.get(a.address) ?? {};
+      return { address: a.address, pct: Number.parseInt(L["claude.context"] ?? L["codex.context"] ?? L["agy.context"] ?? L["agent.context"], 10) };
+    });
+    for (const { address, pct } of contextAlerts(this.contextWarned, items)) {
+      const a = list.find((x) => x.address === address);
+      const { who, folder } = this.whoWhere(a);
+      const title = `Konteks ${who} udah ${pct}%`, body = folder ? `Proyek ${folder}` : "Pixel HQ";
+      try { notify({ title, body: `${body} · klik tumpukan kertas di mejanya buat /compact`, level: "warning", timeout: 15000 }); } catch {}
+      if (!window().active) this.systemToast(title, body);
+    }
+  }
+
+  openPanel(panel) {
+    const props = { panel };
+    if (panel === "prompts") {
+      // staf tujuan = yang lagi fokus waktu tombolnya diklik
+      const f = focused(), a = agents().find((x) => x.address === (f?.agent ?? f?.terminal));
+      if (a) { props.target = a.address; props.targetName = this.whoWhere(a).who; }
+    }
+    openOverlay({ mod: "company-agents", kind: "dialog", frame: "none", ...PANEL_SIZE, props });
+  }
+
+  // Dipanggil popup prompt: fokus ke staf tujuan, pastikan fokusnya benar, baru tempel (tanpa Enter).
+  pastePrompt(cx) {
+    const p = shared("pixel-hq.paste");
+    if (!p || Date.now() - p.at > 5000) return;
+    setShared("pixel-hq.paste", null);
+    const failed = () => { try { notify({ title: "Prompt belum ditempel", body: "Teksnya ada di clipboard, tempel sendiri di staf yang dituju.", level: "warning", timeout: 10000 }); } catch {} };
+    cx.timer.after(200, (cx) => {
+      run("pane.focus", { terminal: p.target });
+      cx.timer.after(300, () => {
+        const f = focused(), a = agents().find((x) => x.address === p.target);
+        if (!a || a.status === "blocked" || (f?.terminal !== p.target && f?.agent !== p.target)) failed();
+        else run("terminal.paste");
+      });
+    });
   }
 
   async readTeam() {
@@ -1726,6 +1786,7 @@ export default class Agents extends View {
     if (props()?.workload) return this.workloadView(t);
     if (props()?.today) return this.todayView(t);
     if (props()?.team) return this.teamView(t);
+    if (props()?.panel) return this.panels.render(t);
     if (this.editor) return this.editor.render(cx);
     const dismissed = shared("pixel-hq.dismissed-version") || localStorage.getItem("upd-dismissed");
     if (this.update && dismissed === String(this.update.version)) {
@@ -2318,11 +2379,17 @@ export default class Agents extends View {
         .tooltip("Panggil balik semua staf yang udah pulang")
         .on_click((_e, cx) => { this.settled.clear(); try { localStorage.removeItem("settled"); } catch { /* storage disabled: next render retries */ } cx.notify(); })
         .child(`✓ ${settledCount} pulang`)))
-      .child(div().id("team-open").absolute().right(8).bottom(8).px(8).py(3).bg("#11111bdd").border_1().border_color("#89b4fa88").text_size(11).text_color("#89b4fa").cursor_pointer()
-        .tooltip("Tim: lanjutkan sesi terakhir tiap proyek, atau rekrut staf baru ke proyek")
-        .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
-        .on_click((_e, cx) => { cx.stop_propagation(); this.openTeam(); })
-        .child("TIM ▸"))
+      .child(h_flex().absolute().right(8).bottom(8).gap(4)
+        .children([
+          ["tool-git", "GIT", "Cek Git: proyek yang belum commit atau push", () => this.openPanel("git")],
+          ["tool-servers", "SERVER", "Server dev yang lagi nyala", () => this.openPanel("servers")],
+          ["tool-prompts", "PROMPT", "Prompt tersimpan, ditempel ke staf yang lagi fokus", () => this.openPanel("prompts")],
+          ["team-open", "TIM ▸", "Tim: lanjutkan sesi terakhir tiap proyek, atau rekrut staf baru ke proyek", () => this.openTeam()],
+        ].map(([id, text, tip, act]) => div().id(id).flex_none().px(7).py(3).bg("#11111bdd").border_1().border_color("#89b4fa88").text_size(11).text_color("#89b4fa").cursor_pointer()
+          .tooltip(tip)
+          .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+          .on_click((_e, cx) => { cx.stop_propagation(); act(); })
+          .child(text))))
       .when(Boolean(this.peek?.text) && !this.drag, (el) => {
         const a = list.find((x) => x.address === this.peek.addr);
         if (!a) return el;

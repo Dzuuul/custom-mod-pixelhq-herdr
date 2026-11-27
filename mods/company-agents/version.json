@@ -1,1 +1,1 @@
-{"version":"2.5.0","type":"normal","notes":"Baru: tombol TIM (lanjutkan sesi atau rekrut ke proyek), intip balasan terakhir, laporan standup, notifikasi sistem, dan meja dikelompokkan per proyek. Pengguna WSL: jalankan lagi installer.","base":"pixel-hq 1.8.4"}
+{"version":"2.6.0","type":"normal","notes":"Baru: cek Git per proyek, daftar server dev, prompt tersimpan, dan peringatan konteks hampir penuh. Antrean kanban sekarang nunggu kalau stafnya lagi nanya.","base":"pixel-hq 1.8.4"}

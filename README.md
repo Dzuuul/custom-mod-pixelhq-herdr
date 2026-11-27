@@ -165,7 +165,8 @@ ikut nunggu, staf itu gak dikasih task lain, dan model/effort-nya belum dikembal
 
 **DITAHAN** (hijau toska): kalau usage Claude sesi 5 jam atau minggu ini sudah **95%** ke atas, task yang belum terkirim
 ke staf Claude ditunda, dengan catatan kapan usage-nya reset (mis. "dikirim setelah reset 14:00"). Task dikirim sendiri
-setelah reset. **KIRIM AJA** mengirimnya sekarang juga. Staf selain Claude Code gak ditahan. Butuh statusLine Pixel HQ
+setelah reset. Task juga **DITAHAN** kalau balasan terakhir staf Claude tujuannya berupa pertanyaan (termasuk dari obrolanmu
+sendiri), biar task gak terkirim sebagai jawaban. **KIRIM AJA** mengirimnya sekarang juga. Staf selain Claude Code gak ditahan. Butuh statusLine Pixel HQ
 (sumber angka usage-nya).
 
 **Task gagal** ditandai merah (kartu tetap di kolom "Sedang dikerjakan") kalau: pengiriman gagal 5 kali,
@@ -267,6 +268,21 @@ Di bawahnya ada model dan effort (mis. `Sonnet 5.5 · medium`), juga dari status
 - **Notifikasi sistem:** waktu jendela Herdr gak di depan, staf yang kelar atau nunggu jawaban memunculkan notifikasi
   Windows (atau `notify-send` di Linux). Isinya cuma nama staf dan proyek. Di Windows muncul atas nama
   "Windows PowerShell"; matikan di Settings → System → Notifications.
+
+Tombol lain di pojok kanan bawah lantai:
+
+- **GIT:** cek proyek di daftar tim: file yang belum di-commit dan commit yang belum di-push. Berguna sebelum pindah
+  komputer. Cuma membaca (gak pernah commit atau push); **FETCH + CEK** menjalankan `git fetch` dulu, biar commit dari
+  komputer lain ketahuan. Folder WSL dicek lewat `wsl.exe`. Stash gak ikut dicek.
+- **SERVER:** port yang lagi dibuka di komputer ini (di Windows: di WSL), dengan nama proses dan foldernya kalau
+  kelihatan (butuh `ss`). **BUKA ↗** membuka `http://localhost:<port>`; gak semua port itu web (mis. database).
+- **PROMPT:** simpan perintah yang sering diketik. Klik meja staf dulu, lalu **PROMPT → TEMPEL**: teksnya masuk ke
+  staf itu **tanpa Enter** (isi clipboard keganti). Staf yang lagi nunggu jawaban ditolak. Daftarnya di
+  `~/.config/herdr-app/pixel-hq-prompts.json`.
+- **Peringatan konteks:** begitu konteks seorang staf sampai 85%, muncul notifikasi sekali (siap lagi setelah turun
+  di bawah 70%). Klik tumpukan kertas di mejanya buat `/compact`.
+
+Buat **antrean tugas**, pakai Kanban: pilih staf tujuan, lalu tugasnya dikirim waktu staf itu kosong.
 
 Kalau label kosong, jalankan doctor (`doctor.cmd`, atau `sh doctor.sh`): jalur WSL ikut dicek.
 

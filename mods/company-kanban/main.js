@@ -74,7 +74,7 @@ function toMarkdown(tasks) {
     out.push(`## ${c.label} (${tasks.filter((t) => t.column === c.id).length})`, ``);
     for (const t of sortedIn(tasks, c.id)) {
       const tags = [t.spaceName, t.priority && t.priority !== "normal" && `prioritas ${t.priority}`, t.model, t.effort, t.targetName, t.failed && (t.stopped ? "DIHENTIKAN" : `GAGAL: ${t.failed}`),
-        !t.failed && t.asking && "PERLU JAWABAN", !t.failed && t.held && "DITAHAN (usage)", t.limitMin && `batas ${t.limitMin} mnt${t.limitStop ? ", lewat = dihentikan" : ""}`,
+        !t.failed && t.asking && "PERLU JAWABAN", !t.failed && t.held && "DITAHAN", t.limitMin && `batas ${t.limitMin} mnt${t.limitStop ? ", lewat = dihentikan" : ""}`,
         t.sentAt && t.finishedAt && `durasi ${fmtDur(t.finishedAt - t.sentAt)}`, costText(t)].filter(Boolean);
       out.push(`- [${c.id === "done" ? "x" : " "}] **${t.title}**${tags.length ? ` (${tags.join(", ")})` : ""}`);
       if (t.detail) out.push(`  ${t.detail.replace(/\n/g, "\n  ")}`);
@@ -262,12 +262,12 @@ export default class Kanban extends View {
     }, cx);
   }
 
-  // Task yang ditahan karena usage Claude hampir habis: kirim sekarang juga.
+  // Task yang ditahan (usage hampir habis, atau stafnya lagi nanya): kirim sekarang juga.
   sendAnyway(id, cx) {
     this.change((d) => {
       const t = d.tasks.find((x) => x.id === id);
       if (!t || t.column !== "doing" || t.failed || t.sentAt) return;
-      t.noHold = true; t.note = "Dikirim walau usage hampir habis…";
+      t.noHold = true; t.note = "Dikirim sekarang…";
     }, cx);
   }
 
@@ -414,7 +414,7 @@ export default class Kanban extends View {
         .when(canLook, (el) => el.child(this.btn(`v-${task.id}`, asking ? "JAWAB ▸" : "LIHAT ▸", asking ? "#f5c2e7" : "#89dceb", (cx) => this.look(task, cx),
           asking ? "Buka terminal staf buat jawab pertanyaannya. Setelah dijawab, task jalan lagi sendiri." : "Buka terminal staf yang pegang task ini")))
         .when(asking, (el) => el.child(this.btn(`k-${task.id}`, "KELAR ✓", "#a6e3a1", (cx) => this.markDone(task.id, cx), "Anggap task ini udah beres tanpa jawab pertanyaannya (pindah ke Selesai)")))
-        .when(held, (el) => el.child(this.btn(`h-${task.id}`, "KIRIM AJA", "#94e2d5", (cx) => this.sendAnyway(task.id, cx), "Kirim sekarang walau usage Claude hampir habis")))
+        .when(held, (el) => el.child(this.btn(`h-${task.id}`, "KIRIM AJA", "#94e2d5", (cx) => this.sendAnyway(task.id, cx), "Kirim sekarang walau lagi ditahan (usage hampir habis, atau stafnya lagi nanya)")))
         .when(Boolean(task.failed) || task.column === "done", (el) => el.child(this.btn(`u-${task.id}`, "ULANGI ↻", "#f38ba8", (cx) => this.retry(task.id, cx), "Kirim ulang task ini ke agent")))
         .when(canEdit && !editing, (el) => el.child(this.btn(`e-${task.id}`, "EDIT", "#89b4fa", (cx) => this.startEdit(task, cx), "Ubah judul, detail, dan pilihan task ini di form atas")))
         .when(canUp, (el) => el.child(this.btn(`up-${task.id}`, "▲", t.muted, (cx) => this.nudge(task.id, -1, cx), "Naikkan urutan")))

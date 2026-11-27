@@ -18,6 +18,8 @@ const PIXEL_HQ_FILES = [
   "mods/company-agents/pixel-hq-notify.ps1",
   "mods/company-agents/state.js",
   "mods/company-agents/team.js",
+  "mods/company-agents/tools.js",
+  "mods/company-agents/panels.js",
   "mods/company-agents/claude-activity.py",
   "mods/company-agents/claude-statusline.ps1",
   "mods/company-agents/claude-statusline.sh",

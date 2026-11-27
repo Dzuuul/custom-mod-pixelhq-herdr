@@ -243,6 +243,16 @@ export class KanbanEngine {
             note(t, `Ditahan: usage ${hold.label} ${hold.used}%, dikirim setelah reset ${fmtClock(hold.resets, now)}`);
             continue;
           }
+          // staf yang balasan terakhirnya pertanyaan (mis. dari obrolanmu sendiri): task antrean jangan sampai jadi jawabannya
+          if (free && isClaude(free) && !t.noHold && !t.preIdx) {
+            const j = await this.state(lastOf(free.address), 10000);
+            const born = terminals().find((x) => x.address === free.address)?.created_ms ?? 0; // nomor terminal bisa dipakai ulang
+            if (j?.text && j.at * 1000 >= born && asksBack(j.text)) {
+              if (!t.held) { t.held = true; changed = true; }
+              note(t, `Ditahan: ${name(free)} lagi nanya. Jawab dulu, atau klik KIRIM AJA`);
+              continue;
+            }
+          }
           if (t.held) { delete t.held; changed = true; }
           const pre = [t.model && `/model ${t.model}`, t.effort && `/effort ${t.effort}`].filter(Boolean);
           if (free && isClaude(free) && (t.preIdx ?? 0) < pre.length) {
