@@ -104,7 +104,33 @@ function activityAll(all) {
 // Today, for the plant and the clock: tasks shipped (an agent going from working to idle or done), time agents spent working, and
 // where. Kept by the office copy in localStorage and shared ("pixel-hq.today") for the clock's popup; it starts over each day.
 const dayKey = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-const freshDay = () => ({ day: dayKey(), shipped: 0, workMs: 0, bySpace: {} });
+const freshDay = () => ({ day: dayKey(), shipped: 0, workMs: 0, bySpace: {}, byFolder: {} });
+
+// Nama folder proyek dari sebuah path, huruf depan besar. Folder home dan root dianggap bukan proyek (null).
+const folderName = (cwd) => {
+  const path = String(cwd || "").replace(/[\\/]+$/, "");
+  if (/^(\/(home\/[^/]+|root|Users\/[^/]+)|[A-Za-z]:\\Users\\[^\\]+)$/.test(path)) return null;
+  const name = path.split(/[\\/]+/).pop();
+  return !name || /^([A-Za-z]:|~)$/.test(name) ? null : name[0].toUpperCase() + name.slice(1);
+};
+// Folder tiap staf: dari statusline (label agent.cwd, satu-satunya sumber buat WSL), kalau gak ada dari pane.
+const foldersOf = (list, terms, ps) => {
+  const reported = new Map(terms.map((k) => [k.address, k.labels?.["agent.cwd"]]));
+  const cwdOf = new Map(ps.map((p) => [p.pane, p.cwd]));
+  return new Map(list.map((a) => [a.address, folderName(reported.get(a.address) || cwdOf.get(a.pane))]));
+};
+// Warna tetap per proyek: nama yang sama selalu dapat warna yang sama (proyek berbeda bisa kebagian warna sama).
+const PROJECT_COLORS = ["#a6e3a1", "#fab387", "#89b4fa", "#f5c2e7", "#f9e2af", "#94e2d5", "#cba6f7", "#f38ba8"];
+const projectColor = (name) => PROJECT_COLORS[[...name.toLowerCase()].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 0) % PROJECT_COLORS.length];
+// Judul sesi yang memang bercerita: bukan nama programnya, path, atau user@host.
+const sessionTitle = (a) => {
+  const live = clean(a.title);
+  const dull = !live || /^(claude( code)?|powershell|windows powershell|bash|zsh|wsl)$/i.test(live) || live.toLowerCase() === String(a.program?.name ?? "").toLowerCase();
+  // path diperiksa di judul mentah: clean() sudah membuang "~/" di depan
+  const isPath = /^[^\p{L}\p{N}~/]*([~/]|[A-Za-z]:\\)/u.test(a.title ?? "");
+  return dull || isPath || live.includes("@") ? null : live;
+};
+const TODAY_ROWS = 6;
 
 function duration(ms) {
   const m = Math.floor(ms / 60000);
@@ -498,6 +524,11 @@ export default class Agents extends View {
     this.today.workMs += ms;
     const where = a.space_name || "?";
     this.today.bySpace[where] = (this.today.bySpace[where] ?? 0) + ms;
+    const folder = foldersOf([a], terminals(), panes()).get(a.address);
+    if (folder) {
+      this.today.byFolder ??= {};
+      this.today.byFolder[folder] = (this.today.byFolder[folder] ?? 0) + ms;
+    }
     if (s === "idle") this.today.shipped += 1;
     try { localStorage.setItem("today", JSON.stringify(this.today)); } catch { /* storage blocked: kept in memory */ }
     setShared("pixel-hq.today", this.today);
@@ -966,7 +997,7 @@ export default class Agents extends View {
       if (sp) out.push(spot(`bld-${sp.id}`, b.x, b.y - 4, b.w, b.h + 4, `${sp.name} · ${word[sp.status] ?? "sepi"}${sp.active ? " · kamu di sini" : " · klik buat ke sana"}`,
         () => run("space.select", { id: sp.id })));
     });
-    const openToday = () => openOverlay({ mod: "company-agents", kind: "popup", frame: "none", width: 300, height: 214, props: { today: true } });
+    const openToday = () => this.openToday();
     out.push(spot("wall-clock", Lo.cx - Lo.rr, Lo.cy - Lo.rr, Lo.rr * 2, Lo.rr * 2, "Hari ini: tugas kelar, waktu kerja, lantai paling sibuk", openToday));
     if (!Lo.sign && o.needYou > 0) out.push(spot("wall-badge", Lo.cx + Lo.rr - 6, Lo.cy + Lo.rr - 8, 12, 10,
       `${o.needYou} ${o.needYou > 1 ? "agents need" : "agent needs"} you · click to see who`, () => this.openNeedsYou()));
@@ -1043,7 +1074,7 @@ export default class Agents extends View {
       .children([4, 8, 12].map((y) => div().absolute().left(B.x + 1).top(B.y + y).w(B.w - 2).h(1).bg("#00000033")))
       .child(div().absolute().left(B.x + 1).top(B.y - 5).w(2).h(2).bg("#6b7194"))
       .child(div().absolute().left(B.x + B.w - 3).top(B.y - 5).w(2).h(2).bg("#6b7194"));
-    const openToday = () => openOverlay({ mod: "company-agents", kind: "popup", frame: "none", width: 300, height: 214, props: { today: true } });
+    const openToday = () => this.openToday();
     return spot("wall-board", B.x - 2, B.y - 6, B.w + 4, B.h + 8, tip, () => (needs ? this.openNeedsYou() : openToday()))
       .child(board.left(-(B.x - 2)).top(-(B.y - 6)));
   }
@@ -1131,6 +1162,8 @@ export default class Agents extends View {
     const raw = shared("pixel-hq.today");
     const d = raw && raw.day === dayKey() ? raw : freshDay();
     const top = Object.entries(d.bySpace ?? {}).sort((p, q) => q[1] - p[1])[0];
+    const projects = Object.entries(d.byFolder ?? {}).sort((p, q) => q[1] - p[1]);
+    const shownProjects = projects.length > TODAY_ROWS ? [...projects.slice(0, TODAY_ROWS - 1), [`${projects.length - TODAY_ROWS + 1} lainnya`, projects.slice(TODAY_ROWS - 1).reduce((n, p) => n + p[1], 0)]] : projects;
     const list = agents();
     const mono = "JetBrains Mono";
     const hm = (ms) => { const m = Math.round(ms / 60000); return m < 60 ? `${m}m` : `${Math.floor(m / 60)}h ${m % 60}m`; };
@@ -1184,7 +1217,18 @@ export default class Agents extends View {
               .child(line("Lagi kerja", String(list.filter((a) => a.status === "working").length)))
               .child(line("Nunggu kamu", String(list.filter((a) => a.status === "blocked").length)))
           )
+          .when(shownProjects.length > 0, (el) => el.child(v_flex().gap(2).pt(4).border_t(1).border_color("#313244")
+            .child(div().px(10).text_size(9.5).font_bold().text_color("#f9e2af").child("WAKTU AGENT PER PROYEK"))
+            .children(shownProjects.map(([name, ms]) => h_flex().justify_between().gap(8).px(10).py(2)
+              .child(div().min_w(0).truncate().text_size(11.5).text_color(projectColor(name)).child(name))
+              .child(div().flex_none().text_size(12).font_bold().text_color(t.foreground).child(hm(ms)))))))
       );
+  }
+
+  openToday() {
+    const raw = shared("pixel-hq.today");
+    const rows = raw?.day === dayKey() ? Math.min(TODAY_ROWS, Object.keys(raw.byFolder ?? {}).length) : 0;
+    openOverlay({ mod: "company-agents", kind: "popup", frame: "none", width: 300, height: 214 + (rows ? 28 + rows * 22 : 0), props: { today: true } });
   }
 
   openNeedsYou() {
@@ -1785,20 +1829,18 @@ export default class Agents extends View {
     const paneBy = new Map(panes().map((p) => [p.pane, p]));
     const withBranch = list.some((a) => paneBy.get(a.pane)?.branch);
     const withVitals = list.some((a) => contextOf.get(a.address));
-    // Folder yang lagi dikerjakan tiap staf: dari statusline (label agent.cwd, satu-satunya sumber buat WSL), kalau gak ada dari pane. Folder home gak ditampilkan.
-    const agentCwd = new Map(terminals().map((k) => [k.address, k.labels?.["agent.cwd"]]));
+    // Folder yang lagi dikerjakan tiap staf. "Ngerjain" cuma selama tugasnya belum kelar (jalan atau nunggu jawaban).
+    const folderOf = foldersOf(list, terminals(), panes());
     const jobOf = new Map(list.map((a) => {
-      const path = String(agentCwd.get(a.address) || paneBy.get(a.pane)?.cwd || "").replace(/[\\/]+$/, "");
-      const name = /^(\/(home\/[^/]+|root|Users\/[^/]+)|[A-Za-z]:\\Users\\[^\\]+)$/.test(path) ? "" : path.split(/[\\/]+/).pop();
-      if (!name || /^([A-Za-z]:|~)$/.test(name)) return [a.address, null];
-      // "Ngerjain" cuma selama tugasnya belum kelar (jalan atau nunggu jawaban); sesudahnya tinggal nama folder.
-      const busy = a.status === "working" || a.status === "blocked";
-      return [a.address, `${busy ? "Ngerjain " : ""}${name[0].toUpperCase()}${name.slice(1)}`];
+      const folder = folderOf.get(a.address);
+      return [a.address, folder && `${a.status === "working" || a.status === "blocked" ? "Ngerjain " : ""}${folder}`];
     }));
+    const topicOf = new Map(list.map((a) => [a.address, sessionTitle(a)]));
+    const withTopic = [...topicOf.values()].some(Boolean);
     const withJob = [...jobOf.values()].some(Boolean);
     const withModel = list.some((a) => { const c = contextOf.get(a.address); return Boolean(c && modelOf(c)); });
     const plan = (sc, extraVitals) => {
-      const P = Math.round(46 * sc), pw = duckWidth(P), cw = Math.max(pw + Math.round(24 * sc), 76), ch = P + Math.round(28 * sc) + 26 + (withBranch || withModel ? 15 : 0) + (withJob ? 15 : 0) + extraVitals;
+      const P = Math.round(46 * sc), pw = duckWidth(P), cw = Math.max(pw + Math.round(24 * sc), 76), ch = P + Math.round(28 * sc) + 26 + (withBranch || withModel ? 15 : 0) + (withJob ? 15 : 0) + (withTopic ? 14 : 0) + extraVitals;
       return { sc, P, pw, cw, ch, cols: Math.max(1, Math.floor((sz.width - 8) / cw)), rows: Math.max(1, Math.floor((sz.height - fieldTop - 4) / ch)) };
     };
     const scales = [1, 0.9, 0.8, 0.7, 0.6, 0.5, 0.42];
@@ -1825,7 +1867,7 @@ export default class Agents extends View {
     // kata kunci dua bahasa: yang Inggris tetap jalan, yang Indonesia ditambah
     const STATE = { working: "typing working busy ngetik kerja sibuk", idle: "idle break coffee snooze urge sleeping santai ngopi tidur nganggur", done: "shipped done finished kelar selesai beres", blocked: "needs you blocked waiting nunggu tunggu" };
     const q = this.query.trim().toLowerCase();
-    const hitOf = (a) => !q || q.split(/\s+/).every((w) => [detail.get(a.address), a.space_name, label(a), (shared("pixel-hq.names") ?? {})[a.pane]?.name, a.program?.name, ROLES(a), STATE[a.status]].join(" ").toLowerCase().includes(w));
+    const hitOf = (a) => !q || q.split(/\s+/).every((w) => [detail.get(a.address), a.space_name, label(a), (shared("pixel-hq.names") ?? {})[a.pane]?.name, a.program?.name, jobOf.get(a.address), topicOf.get(a.address), ROLES(a), STATE[a.status]].join(" ").toLowerCase().includes(w));
     const hits = list.filter(hitOf);
     this.firstHit = q ? hits[0]?.pane ?? null : null;
     const breakers = list.filter((x) => x.status === "idle" && !x.focused && this.waitOf(x.address, x.status, now) < IDLE_SNOOZE).map((x) => x.address);
@@ -1861,6 +1903,7 @@ export default class Agents extends View {
       // The desk's branch (its own worktree, ideally) and whether another desk is about to step on it.
       const branch = paneBy.get(a.pane)?.branch ?? null;
       const job = jobOf.get(a.address);
+      const topic = topicOf.get(a.address);
       const infoW = Math.max(petW + 22, cellW - 4, Math.floor(sz.width / colsUsed) - 6);
       const cl = this.clash.get(a.address) ?? null;
       const clText = cl ? (cl.kind === "file" ? `clash: ${String(cl.files[0] ?? "").split("/").pop()}${cl.files.length > 1 ? ` +${cl.files.length - 1}` : ""}` : "folder sama") : "";
@@ -2007,14 +2050,16 @@ export default class Agents extends View {
         })
         .on_mouse_up("left", (_e, cx) => endDrag(cx))
         .on_mouse_down("right", (_e, cx) => { cx.stop_propagation(); openFigures(a.space_name); })
-        .tooltip(`${a.program?.name ?? ""} · ${isUrge ? `idle for ${duration(waited)} · click to focus` : isSnooze ? `snoozing (${duration(waited)}) · click to focus` : a.status} · ${text}${job ? ` · ${job}` : ""}${branch ? ` · ${branch}` : ""}${clTip ? ` · ${clTip}` : ""}${ctx ? ` · ${vitalsTip(ctx)}` : ""}${act.interns.length ? ` · ${act.interns.length} sub-agent${act.interns.length > 1 ? "s" : ""}` : ""}${act.jobs ? ` · ${act.jobs} shell job${act.jobs > 1 ? "s" : ""}${act.long ? ` (${act.long} over a minute)` : ""}` : ""} · drag to move`)
+        .tooltip(`${a.program?.name ?? ""} · ${isUrge ? `idle for ${duration(waited)} · click to focus` : isSnooze ? `snoozing (${duration(waited)}) · click to focus` : a.status} · ${text}${job ? ` · ${job}` : ""}${topic ? ` · ${topic}` : ""}${branch ? ` · ${branch}` : ""}${clTip ? ` · ${clTip}` : ""}${ctx ? ` · ${vitalsTip(ctx)}` : ""}${act.interns.length ? ` · ${act.interns.length} sub-agent${act.interns.length > 1 ? "s" : ""}` : ""}${act.jobs ? ` · ${act.jobs} shell job${act.jobs > 1 ? "s" : ""}${act.long ? ` (${act.long} over a minute)` : ""}` : ""} · drag to move`)
         .child(seat)
         .child(div().mt(6).max_w(Math.max(petW + 22, cellW - 4)).px(5).h(15).flex().items_center()
           .bg(this.hint?.addr === a.address ? "#cba6f7" : cl ? (cl.kind === "file" ? "#ff5370" : "#f9b84a") : a.focused || (q && hitOf(a)) ? "#f9e2af" : hot ? "#f38ba8" : isUrge ? "#fab387" : isSnooze ? "#45475a" : "#0f111acc")
           .text_size(10.5).text_color(this.hint?.addr === a.address ? "#1e1233" : cl ? "#2a0f16" : a.focused || (q && hitOf(a)) ? "#2a1a14" : isUrge ? "#1e1e2e" : isSnooze ? "#cdd6f4" : "#ffffff").truncate()
           .child(this.hint?.addr === a.address ? this.hint.text : cl ? clText : `${text}${when && cellW >= 90 ? (isUrge ? ` · idle ${duration(waited)} ⏰` : isSnooze ? ` · zzz ${duration(waited)}` : ` · ${duration(waited)}`) : ""}`))
-        .when(Boolean(job), (el) => el.child(div().mt(2).w(infoW).flex_none().flex().justify_center().text_size(9.5).text_color("#f9e2af")
+        .when(Boolean(job), (el) => el.child(div().mt(2).w(infoW).flex_none().flex().justify_center().text_size(9.5).text_color(projectColor(folderOf.get(a.address)))
           .child(div().min_w(0).truncate().child(job))))
+        .when(Boolean(topic), (el) => el.child(div().mt(1).w(infoW).flex_none().flex().justify_center().text_size(9).text_color("#a6adc8")
+          .child(div().min_w(0).truncate().child(topic))))
         .when(Boolean(branch) || Boolean(modelTxt), (el) => el.child(h_flex().mt(2).gap(3).items_center().justify_center().w(infoW).flex_none().text_size(9.5)
           .when(Boolean(branch), (el) => el
             .child(div().relative().w(8).h(10).flex_none().children([[0, 0, 2, 2], [0, 8, 2, 2], [5, 2, 2, 2], [0, 2, 1, 6], [1, 4, 5, 1]].map(([x, y, w, h]) => div().absolute().left(x).top(y).w(w).h(h).bg("#89b4fa"))))

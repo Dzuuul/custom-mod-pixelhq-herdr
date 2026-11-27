@@ -126,7 +126,8 @@ function Remove-TaskCommand {
 
 # variabel WSL dari install.ps1 (isi WSLENV lain dipertahankan). Bukan bagian backup, jadi dicopot juga waktu -Restore
 function Remove-WslEnv {
-  if (-not [Environment]::GetEnvironmentVariable('PIXELHQ_HC', 'User')) { return }
+  # cuma kalau menunjuk hc.exe milik akun ini: uninstall dengan home/LOCALAPPDATA lain (mis. tes) gak boleh menyentuh registry asli
+  if (-not $env:LOCALAPPDATA -or [Environment]::GetEnvironmentVariable('PIXELHQ_HC', 'User') -ne (Join-Path $env:LOCALAPPDATA 'Programs\herdr-core\hc.exe')) { return }
   $wslenv = @(([string][Environment]::GetEnvironmentVariable('WSLENV', 'User')) -split ':' | Where-Object { $_ -and $_ -notmatch '^(HC_TERMINAL_ID|PIXELHQ_HC)(/|$)' }) -join ':'
   [Environment]::SetEnvironmentVariable('WSLENV', $(if ($wslenv) { $wslenv } else { $null }), 'User')
   [Environment]::SetEnvironmentVariable('PIXELHQ_HC', $null, 'User')

@@ -249,6 +249,14 @@ Di bawah nama tiap staf ada `Ngerjain <Folder>` selama agent-nya bekerja atau nu
 (label `agent.cwd` dari statusline; kalau gak ada, folder panelnya). Folder home gak ditampilkan.
 Di bawahnya ada model dan effort (mis. `Sonnet 5.5 · medium`), juga dari statusline.
 
+- **Warna per proyek:** nama folder selalu dapat warna yang sama (warnanya cuma 8, jadi bisa ada yang kembar).
+- **Judul sesi:** judul yang dipasang Claude (mis. `Peta port VPS`) tampil di bawah folder; lengkapnya di tooltip.
+- **Cari staf:** nama folder dan judul sesi ikut dicari.
+- **Rapor harian:** klik jam di dinding buat lihat waktu kerja agent per proyek. Dihitung tiap agent selesai atau
+  nunggu jawaban, selama Herdr terbuka, dan mulai lagi dari nol tiap hari (bukan jam kerja kamu).
+
+Kalau label kosong, jalankan doctor (`doctor.cmd`, atau `sh doctor.sh`): jalur WSL ikut dicek.
+
 **Claude di WSL di dalam Herdr Windows:** Herdr cuma tahu folder PowerShell yang menjalankan `wsl.exe`,
 jadi datanya harus dilaporkan dari WSL. Pasang dua-duanya: `install.cmd` di Windows (menambah `HC_TERMINAL_ID`
 dan `PIXELHQ_HC` ke `WSLENV` milik user) dan `sh install.sh` di WSL (statusline; butuh `~/.config/herdr-app` di WSL).

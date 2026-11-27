@@ -1,1 +1,1 @@
-{"version":"2.3.1","type":"normal","notes":"Label folder gak kepotong lagi, kata Ngerjain hilang kalau tugas kelar, model dan effort tampil di bawah meja.","base":"pixel-hq 1.8.4"}
+{"version":"2.4.0","type":"normal","notes":"Baru: warna per proyek, judul sesi di bawah meja, cari staf lewat nama folder, rapor waktu agent per proyek (klik jam dinding), dan pixel-hq-doctor mengecek jalur WSL. Pengguna WSL: jalankan lagi installer.","base":"pixel-hq 1.8.4"}

@@ -274,6 +274,37 @@ function Check-Terminal {
   try { Info ('ExecutionPolicy: ' + (Get-ExecutionPolicy).ToString() + ' (skrip Pixel HQ jalan dengan -ExecutionPolicy Bypass)') } catch {}
 }
 
+# Jalur laporan dari Claude di WSL ke Herdr Windows (label "Ngerjain <folder>", context, model). Cuma baca.
+function Check-WslBridge {
+  $wslenv = @(([string][Environment]::GetEnvironmentVariable('WSLENV', 'User')) -split ':' | ForEach-Object { $_.Split('/')[0] })
+  $hcPath = [string][Environment]::GetEnvironmentVariable('PIXELHQ_HC', 'User')
+  $missing = @('HC_TERMINAL_ID', 'PIXELHQ_HC' | Where-Object { $wslenv -notcontains $_ })
+  $envOk = $false
+  if ($missing.Count) { Warn ('WSLENV belum meneruskan ' + ($missing -join ', ') + ': meja staf WSL gak dapat folder dan model') 'jalankan install.cmd' }
+  elseif (-not $hcPath -or -not [System.IO.File]::Exists($hcPath)) { Warn 'PIXELHQ_HC kosong atau menunjuk file yang gak ada' 'jalankan install.cmd' }
+  else { Ok 'WSLENV dan PIXELHQ_HC terpasang'; $envOk = $true }
+
+  # terminal Herdr yang menjalankan agent di WSL tapi belum pernah melapor
+  $hc = Find-Exe 'hc'
+  if (-not $hc -and $hcPath -and [System.IO.File]::Exists($hcPath)) { $hc = $hcPath }
+  if (-not $hc) { return }
+  $r = Run-Tool $hc @('ls', '--json') 8000
+  if (-not $r -or $r.code -ne 0) { return }
+  $ls = $null
+  try { $ls = ConvertFrom-Json -InputObject $r.out } catch { return }
+  foreach ($t in @(Items (Prop $ls 'terminals') | Where-Object { Prop $_ 'agent' })) {
+    $address = [string](Prop $t 'address')
+    $g = Run-Tool $hc @('get', $address, '--json') 8000
+    if (-not $g -or $g.code -ne 0) { continue }
+    $info = $null
+    try { $info = ConvertFrom-Json -InputObject $g.out } catch { continue }
+    if ([string](Prop (Prop $info 'foreground') 'name') -ne 'wsl.exe') { continue }
+    if (Prop (Prop $info 'labels') 'agent.cwd') { Ok "terminal ${address}: agent di WSL sudah melaporkan foldernya" }
+    elseif ($envOk) { Warn "terminal ${address}: agent di WSL belum melaporkan foldernya" 'terminal yang dibuka sebelum install.cmd gak punya HC_TERMINAL_ID: dari PowerShell di luar Herdr jalankan "hc server restart --fresh", buka terminal baru, lalu claude --resume. Cek di WSL: echo $HC_TERMINAL_ID (kalau terminal baru, tunggu statusline Claude muncul dan pastikan "sh install.sh" sudah dijalankan di WSL)' }
+    else { Info "terminal ${address}: agent di WSL belum melaporkan foldernya (lihat WSLENV di atas)" }
+  }
+}
+
 function Check-Wsl {
   Section 'WSL'
   $wsl = Find-Exe 'wsl.exe'
@@ -287,8 +318,11 @@ function Check-Wsl {
   $running = @()
   if ($run -and $run.code -eq 0) { $running = @($run.out.Replace([string][char]0, '') -split "`r?`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ -match '^[\w.-]+$' }) }
   Info ('distro: ' + ($names -join ', ') + '; yang lagi jalan: ' + $(if ($running.Count) { $running -join ', ' } else { '-' }))
+  Check-WslBridge
   foreach ($d in $running) {
     if ($d -match '^docker-desktop') { continue }
+    $old = Run-Tool $wsl @('-d', $d, '-e', 'sh', '-c', 'f="$HOME/.claude/pixel-hq-statusline.sh"; [ -f "$f" ] && ! grep -q PIXELHQ_HC "$f" && echo lama') 8000
+    if ($old -and $old.out.Trim() -eq 'lama') { Warn "${d}: statusline Pixel HQ versi lama, gak bisa melapor ke Herdr Windows" 'di WSL jalankan: git pull && sh install.sh' }
     $r = Run-Tool $wsl @('-d', $d, '-e', 'sh', '-c', 'stat -c %Y "$HOME/.local/state/pixel-hq/claude-usage.json" 2>/dev/null') 8000
     if ($r -and $r.code -eq 0 -and $r.out.Trim() -match '^\d+$') { Info "${d}: claude-usage.json ditulis $(Ago ([long]$r.out.Trim())) (Herdr membacanya dari sini juga)" }
     else { Info "${d}: belum ada claude-usage.json (Claude Code gak dipakai di distro ini, atau statusLine-nya bukan Pixel HQ)" }

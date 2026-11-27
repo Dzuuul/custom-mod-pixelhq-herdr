@@ -87,6 +87,9 @@ $Keys0 = '{"global":{"ctrl-shift-m":"app.palette"}}' + "`n"
 $Set0 = '{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"echo punyaku"}]}]}}' + "`n"
 [System.IO.File]::WriteAllText((Join-Path $Cfg 'keys.json'), $Keys0, $utf8)
 [System.IO.File]::WriteAllText((Join-Path $F '.claude\settings.json'), $Set0, $utf8)
+# registry asli (variabel WSL dari install.ps1) gak boleh berubah gara-gara tes di home tiruan
+function Get-WslVars { return [string][Environment]::GetEnvironmentVariable('WSLENV', 'User') + '|' + [string][Environment]::GetEnvironmentVariable('PIXELHQ_HC', 'User') }
+$WslVars0 = Get-WslVars
 $env:USERPROFILE = $F
 $env:LOCALAPPDATA = Join-Path $F 'AppData\Local'
 $env:Path = "$Apps;" + $env:Path
@@ -195,6 +198,7 @@ try {
   Check 'data dihapus' (-not (Test-Path $inbox) -and -not (Test-Path (Join-Path $Cfg 'pixel-hq-kanban.json')) -and -not (Test-Path $StateDir))
   Check 'pixel-hq-task dicopot' (-not (Test-Path $shim))
   Check 'backup sebelum copot dibuat' (@(Get-ChildItem (Join-Path $F 'backups\herdr') -Filter 'sebelum-uninstall-pixelhq-*.zip').Count -ge 1)
+  Check 'WSLENV dan PIXELHQ_HC asli gak disentuh' ((Get-WslVars) -ceq $WslVars0) (Get-WslVars)
 } catch {
   Write-Host ('GAGAL tes berhenti: ' + $_.Exception.Message + ' (baris ' + $_.InvocationInfo.ScriptLineNumber + ')') -ForegroundColor Red
   $script:fails++

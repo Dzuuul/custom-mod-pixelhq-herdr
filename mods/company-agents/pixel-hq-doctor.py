@@ -307,6 +307,31 @@ def check_terminal():
         bad("python3 gak ada: hook aktivitas dan statusLine gak jalan")
 
 
+def check_wsl():
+    """Di dalam WSL: apakah terminal ini bisa melapor ke Herdr Windows (label folder dan model di meja staf)."""
+    if not os.environ.get("WSL_DISTRO_NAME"):
+        return
+    section("WSL")
+    term, hc = os.environ.get("HC_TERMINAL_ID"), os.environ.get("PIXELHQ_HC")
+    if hc:
+        if not os.access(hc, os.X_OK):
+            warn(f"PIXELHQ_HC menunjuk file yang gak bisa dijalankan: {hc}", "jalankan lagi install.cmd di Windows")
+        elif not term:
+            warn("PIXELHQ_HC ada tapi HC_TERMINAL_ID kosong", "buka terminal baru di Herdr Windows")
+        else:
+            ok(f"terminal ini ({term}) melapor ke Herdr Windows")
+    else:
+        info("PIXELHQ_HC gak diteruskan ke terminal ini. Kalau ini terminal di Herdr Windows, meja stafnya gak dapat folder dan model:")
+        info("jalankan install.cmd di Windows, lalu dari PowerShell di luar Herdr: hc server restart --fresh, dan buka terminal baru")
+    copy = os.path.join(HOME, ".claude", "pixel-hq-statusline.sh")
+    try:
+        with open(copy, encoding="utf-8") as fh:
+            if "PIXELHQ_HC" not in fh.read():
+                warn("statusline Pixel HQ versi lama, gak bisa melapor ke Herdr Windows", "sh install.sh")
+    except OSError:
+        pass
+
+
 def main() -> int:
     say(f"Pixel HQ doctor · {time.strftime('%Y-%m-%d %H:%M:%S')}")
     check_system()
@@ -316,6 +341,7 @@ def main() -> int:
     check_claude()
     check_data()
     check_terminal()
+    check_wsl()
     say()
     say(f"Ringkasan: {count['MASALAH']} masalah, {count['AWAS']} peringatan")
     say("Laporan ini gak berisi isi task, balasan agent, atau isi settings.json selain bagian Pixel HQ.")
