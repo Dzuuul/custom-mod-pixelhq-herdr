@@ -1785,8 +1785,16 @@ export default class Agents extends View {
     const paneBy = new Map(panes().map((p) => [p.pane, p]));
     const withBranch = list.some((a) => paneBy.get(a.pane)?.branch);
     const withVitals = list.some((a) => contextOf.get(a.address));
+    // Folder yang lagi dikerjakan tiap staf: dari statusline (label agent.cwd, satu-satunya sumber buat WSL), kalau gak ada dari pane. Folder home gak ditampilkan.
+    const agentCwd = new Map(terminals().map((k) => [k.address, k.labels?.["agent.cwd"]]));
+    const jobOf = new Map(list.map((a) => {
+      const path = String(agentCwd.get(a.address) || paneBy.get(a.pane)?.cwd || "").replace(/[\\/]+$/, "");
+      const name = /^(\/(home\/[^/]+|root|Users\/[^/]+)|[A-Za-z]:\\Users\\[^\\]+)$/.test(path) ? "" : path.split(/[\\/]+/).pop();
+      return [a.address, name && !/^([A-Za-z]:|~)$/.test(name) ? `Ngerjain ${name[0].toUpperCase()}${name.slice(1)}` : null];
+    }));
+    const withJob = [...jobOf.values()].some(Boolean);
     const plan = (sc, extraVitals) => {
-      const P = Math.round(46 * sc), pw = duckWidth(P), cw = Math.max(pw + Math.round(24 * sc), 76), ch = P + Math.round(28 * sc) + 26 + (withBranch ? 15 : 0) + extraVitals;
+      const P = Math.round(46 * sc), pw = duckWidth(P), cw = Math.max(pw + Math.round(24 * sc), 76), ch = P + Math.round(28 * sc) + 26 + (withBranch ? 15 : 0) + (withJob ? 15 : 0) + extraVitals;
       return { sc, P, pw, cw, ch, cols: Math.max(1, Math.floor((sz.width - 8) / cw)), rows: Math.max(1, Math.floor((sz.height - fieldTop - 4) / ch)) };
     };
     const scales = [1, 0.9, 0.8, 0.7, 0.6, 0.5, 0.42];
@@ -1848,6 +1856,7 @@ export default class Agents extends View {
       const text = (shared("pixel-hq.names") ?? {})[a.pane]?.name ?? more ?? a.space_name ?? label(a);
       // The desk's branch (its own worktree, ideally) and whether another desk is about to step on it.
       const branch = paneBy.get(a.pane)?.branch ?? null;
+      const job = jobOf.get(a.address);
       const cl = this.clash.get(a.address) ?? null;
       const clText = cl ? (cl.kind === "file" ? `clash: ${String(cl.files[0] ?? "").split("/").pop()}${cl.files.length > 1 ? ` +${cl.files.length - 1}` : ""}` : "folder sama") : "";
       const clTip = cl ? (cl.kind === "file" ? `Another desk also changed ${cl.files.join(", ")}` : "Meja lain lagi kerja di folder yang sama") : "";
@@ -1993,12 +2002,13 @@ export default class Agents extends View {
         })
         .on_mouse_up("left", (_e, cx) => endDrag(cx))
         .on_mouse_down("right", (_e, cx) => { cx.stop_propagation(); openFigures(a.space_name); })
-        .tooltip(`${a.program?.name ?? ""} · ${isUrge ? `idle for ${duration(waited)} · click to focus` : isSnooze ? `snoozing (${duration(waited)}) · click to focus` : a.status} · ${text}${branch ? ` · ${branch}` : ""}${clTip ? ` · ${clTip}` : ""}${ctx ? ` · ${vitalsTip(ctx)}` : ""}${act.interns.length ? ` · ${act.interns.length} sub-agent${act.interns.length > 1 ? "s" : ""}` : ""}${act.jobs ? ` · ${act.jobs} shell job${act.jobs > 1 ? "s" : ""}${act.long ? ` (${act.long} over a minute)` : ""}` : ""} · drag to move`)
+        .tooltip(`${a.program?.name ?? ""} · ${isUrge ? `idle for ${duration(waited)} · click to focus` : isSnooze ? `snoozing (${duration(waited)}) · click to focus` : a.status} · ${text}${job ? ` · ${job}` : ""}${branch ? ` · ${branch}` : ""}${clTip ? ` · ${clTip}` : ""}${ctx ? ` · ${vitalsTip(ctx)}` : ""}${act.interns.length ? ` · ${act.interns.length} sub-agent${act.interns.length > 1 ? "s" : ""}` : ""}${act.jobs ? ` · ${act.jobs} shell job${act.jobs > 1 ? "s" : ""}${act.long ? ` (${act.long} over a minute)` : ""}` : ""} · drag to move`)
         .child(seat)
         .child(div().mt(6).max_w(Math.max(petW + 22, cellW - 4)).px(5).h(15).flex().items_center()
           .bg(this.hint?.addr === a.address ? "#cba6f7" : cl ? (cl.kind === "file" ? "#ff5370" : "#f9b84a") : a.focused || (q && hitOf(a)) ? "#f9e2af" : hot ? "#f38ba8" : isUrge ? "#fab387" : isSnooze ? "#45475a" : "#0f111acc")
           .text_size(10.5).text_color(this.hint?.addr === a.address ? "#1e1233" : cl ? "#2a0f16" : a.focused || (q && hitOf(a)) ? "#2a1a14" : isUrge ? "#1e1e2e" : isSnooze ? "#cdd6f4" : "#ffffff").truncate()
           .child(this.hint?.addr === a.address ? this.hint.text : cl ? clText : `${text}${when && cellW >= 90 ? (isUrge ? ` · idle ${duration(waited)} ⏰` : isSnooze ? ` · zzz ${duration(waited)}` : ` · ${duration(waited)}`) : ""}`))
+        .when(Boolean(job), (el) => el.child(div().mt(2).max_w(Math.max(petW + 22, cellW - 4)).text_size(9.5).text_color("#f9e2af").truncate().child(job)))
         .when(Boolean(branch) || Boolean(modelTxt), (el) => el.child(h_flex().mt(2).gap(3).items_center().max_w(Math.max(petW + 22, cellW - 4)).text_size(9.5)
           .when(Boolean(branch), (el) => el
             .child(div().relative().w(8).h(10).flex_none().children([[0, 0, 2, 2], [0, 8, 2, 2], [5, 2, 2, 2], [0, 2, 1, 6], [1, 4, 5, 1]].map(([x, y, w, h]) => div().absolute().left(x).top(y).w(w).h(h).bg("#89b4fa"))))

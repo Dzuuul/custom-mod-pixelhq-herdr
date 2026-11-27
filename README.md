@@ -242,6 +242,17 @@ dan bisa dicari lewat kotak "Cari staf".
 - Panel yang sudah hilang lebih dari 5 menit dibuang dari file itu, supaya namanya bisa dipakai lagi.
 - Ini berlaku untuk semua terminal (termasuk shell biasa), bukan cuma agent.
 
+## Label "Ngerjain <folder>"
+
+Di bawah nama tiap staf ada `Ngerjain <Folder>`, diambil dari folder tempat agent-nya jalan
+(label `agent.cwd` dari statusline; kalau gak ada, folder panelnya). Folder home gak ditampilkan.
+
+**Claude di WSL di dalam Herdr Windows:** Herdr cuma tahu folder PowerShell yang menjalankan `wsl.exe`,
+jadi datanya harus dilaporkan dari WSL. Pasang dua-duanya: `install.cmd` di Windows (menambah `HC_TERMINAL_ID`
+dan `PIXELHQ_HC` ke `WSLENV` milik user) dan `sh install.sh` di WSL (statusline; butuh `~/.config/herdr-app` di WSL).
+Habis itu **restart Herdr dan buka terminal baru**; terminal lama masih pakai environment lama.
+Labelnya muncul setelah Claude menggambar statusline.
+
 ## Update
 
 Updater bawaan Pixel HQ sekarang mengecek **repo ini** (`mods/company-agents/version.json` di branch `main`),

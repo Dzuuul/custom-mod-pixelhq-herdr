@@ -157,8 +157,10 @@ pct=${fields%%\|*}; rest=${fields#*\|}; model=${rest%%\|*}; rest=${rest#*\|}; qu
 effort=${rest%%\|*}; rest=${rest#*\|}; cost=${rest%%\|*}; rest=${rest#*\|}
 tokens=${rest%%\|*}; cwd=${rest#*\|}
 
-if [ -n "$HC_TERMINAL_ID" ] && command -v hc >/dev/null 2>&1; then
-  hc label "$HC_TERMINAL_ID" \
+# Di WSL di dalam Herdr Windows, PIXELHQ_HC (diteruskan lewat WSLENV, dipasang install.ps1) menunjuk hc.exe Windows.
+hc_bin=${PIXELHQ_HC:-hc}
+if [ -n "$HC_TERMINAL_ID" ] && command -v "$hc_bin" >/dev/null 2>&1; then
+  "$hc_bin" label "$HC_TERMINAL_ID" \
     "agent.context=$pct" "claude.context=$pct" "agy.context=$pct" \
     "agent.model=$model" "claude.model=$model" "agy.model=$model" \
     "agent.quota=$quota" "claude.quota=$quota" "agy.quota=$quota" \

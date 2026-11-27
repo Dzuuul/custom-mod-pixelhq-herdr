@@ -210,6 +210,15 @@ function Set-TaskCommand {
 }
 Set-TaskCommand
 
+# 6. WSL: teruskan id terminal dan lokasi hc.exe ke WSL, biar statusline di sana bisa melapor ke Herdr Windows (folder kerja, context, model).
+$hcExe = Join-Path $env:LOCALAPPDATA 'Programs\herdr-core\hc.exe'
+if ((Get-Command wsl.exe -ErrorAction SilentlyContinue) -and (Test-Path -LiteralPath $hcExe -PathType Leaf)) {
+  $wslenv = @(([string][Environment]::GetEnvironmentVariable('WSLENV', 'User')) -split ':' | Where-Object { $_ -and $_ -notmatch '^(HC_TERMINAL_ID|PIXELHQ_HC)(/|$)' })
+  [Environment]::SetEnvironmentVariable('PIXELHQ_HC', $hcExe, 'User')
+  [Environment]::SetEnvironmentVariable('WSLENV', (($wslenv + 'HC_TERMINAL_ID/u' + 'PIXELHQ_HC/up') -join ':'), 'User')
+  Write-Host 'WSL: HC_TERMINAL_ID dan PIXELHQ_HC diteruskan lewat WSLENV. Jalanin juga "sh install.sh" di WSL, lalu restart Windows Herdr.'
+}
+
 Write-Host ''
 Write-Host 'Selesai. Aktifkan layout-nya:'
 Write-Host '  herdr-app do layout.switch --name pixel-hq'

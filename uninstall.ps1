@@ -124,6 +124,15 @@ function Remove-TaskCommand {
   }
 }
 
+# variabel WSL dari install.ps1 (isi WSLENV lain dipertahankan). Bukan bagian backup, jadi dicopot juga waktu -Restore
+function Remove-WslEnv {
+  if (-not [Environment]::GetEnvironmentVariable('PIXELHQ_HC', 'User')) { return }
+  $wslenv = @(([string][Environment]::GetEnvironmentVariable('WSLENV', 'User')) -split ':' | Where-Object { $_ -and $_ -notmatch '^(HC_TERMINAL_ID|PIXELHQ_HC)(/|$)' }) -join ':'
+  [Environment]::SetEnvironmentVariable('WSLENV', $(if ($wslenv) { $wslenv } else { $null }), 'User')
+  [Environment]::SetEnvironmentVariable('PIXELHQ_HC', $null, 'User')
+  Write-Host 'Variabel WSL Pixel HQ dicabut'
+}
+
 # pindah dari layout pixel-hq dulu kalau Herdr lagi jalan, biar gak error waktu mod-nya hilang
 function Leave-Layout {
   $exe = Get-Command herdr-app -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -179,6 +188,7 @@ if ($Restore) {
     }
   } finally { $zip.Dispose() }
   Remove-TaskCommand
+  Remove-WslEnv
   Write-Host "Dipulihkan dari $last"
   if ($failed.Count) { Write-Host ("Gak bisa dipulihkan (lagi dikunci? tutup Herdr lalu ulangi): " + ($failed -join ', ')) -ForegroundColor Yellow }
   Write-Host 'Restart Herdr biar semuanya kepake.'
@@ -215,6 +225,8 @@ foreach ($f in 'pixel-hq-statusline.ps1', 'pixel-hq-statusline.sh') {
   $p = Join-Path $UserHome ".claude\$f"
   if (Test-Path -LiteralPath $p -PathType Leaf) { Remove-Item -LiteralPath $p -Force }
 }
+
+Remove-WslEnv
 
 # 2. Herdr: mod, layout, tema, hotkey
 Leave-Layout
