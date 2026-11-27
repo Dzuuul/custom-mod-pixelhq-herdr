@@ -244,8 +244,10 @@ dan bisa dicari lewat kotak "Cari staf".
 
 ## Label "Ngerjain <folder>"
 
-Di bawah nama tiap staf ada `Ngerjain <Folder>`, diambil dari folder tempat agent-nya jalan
+Di bawah nama tiap staf ada `Ngerjain <Folder>` selama agent-nya bekerja atau nunggu jawaban; sesudah kelar tinggal
+`<Folder>`. Namanya diambil dari folder tempat agent-nya jalan
 (label `agent.cwd` dari statusline; kalau gak ada, folder panelnya). Folder home gak ditampilkan.
+Di bawahnya ada model dan effort (mis. `Sonnet 5.5 · medium`), juga dari statusline.
 
 **Claude di WSL di dalam Herdr Windows:** Herdr cuma tahu folder PowerShell yang menjalankan `wsl.exe`,
 jadi datanya harus dilaporkan dari WSL. Pasang dua-duanya: `install.cmd` di Windows (menambah `HC_TERMINAL_ID`
