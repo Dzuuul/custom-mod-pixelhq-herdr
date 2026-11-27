@@ -4,7 +4,7 @@
 - daftar cadangan updater (PIXEL_HQ_FILES di updater.js) sama dengan isi layouts/, mods/, themes/ di git
 - skrip Windows (.ps1, .cmd) ASCII saja (PowerShell 5.1 membacanya sebagai ANSI) dan gak ada BOM di file lain
 - semua file JSON di layouts/, themes/, mods/ valid; version.json punya versi x.y.z
-- state.js di company-status dan company-usage sama persis (mod gak bisa saling impor)
+- state.js di company-status, company-usage, dan company-agents sama persis (mod gak bisa saling impor)
 - skrip .sh lolos `sh -n`, skrip .py lolos kompilasi
 - .gitattributes masih mengatur akhir baris (.sh LF, .ps1/.cmd CRLF)
 """
@@ -77,9 +77,9 @@ def main() -> int:
         fail(f"version.json: versi '{v.get('version')}' bukan x.y.z")
 
     a = open(os.path.join(ROOT, "mods/company-status/state.js"), "rb").read()
-    b = open(os.path.join(ROOT, "mods/company-usage/state.js"), "rb").read()
-    if a != b:
-        fail("mods/company-status/state.js dan mods/company-usage/state.js beda (harus sama persis)")
+    for other in ("mods/company-usage/state.js", "mods/company-agents/state.js"):
+        if a != open(os.path.join(ROOT, other), "rb").read():
+            fail(f"mods/company-status/state.js dan {other} beda (harus sama persis)")
 
     attrs = open(os.path.join(ROOT, ".gitattributes"), encoding="utf-8").read()
     for rule in ("*.sh text eol=lf", "*.cmd text eol=crlf", "*.ps1 text eol=crlf"):

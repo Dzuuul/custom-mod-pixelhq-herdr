@@ -143,7 +143,8 @@ def main() -> None:
         except Exception:
             pass
         action = "turn-end"
-    hc = shutil.which("hc") or os.path.expanduser("~/.local/bin/hc")
+    # Di WSL di dalam Herdr Windows, PIXELHQ_HC menunjuk hc.exe Windows (lihat claude-statusline.sh).
+    hc = os.environ.get("PIXELHQ_HC") or shutil.which("hc") or os.path.expanduser("~/.local/bin/hc")
     if not os.path.exists(hc):
         return
 

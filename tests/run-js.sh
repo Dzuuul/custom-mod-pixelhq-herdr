@@ -7,7 +7,7 @@ command -v gjs >/dev/null || { echo "gjs dibutuhin (apt install gjs)." >&2; exit
 T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
 cp "$ROOT"/tests/js/*.js "$T/"
 # salinan mod dengan import "herdr" diganti ke mock.js
-for f in company-status/kanban.js company-status/state.js company-agents/updater.js; do
+for f in company-status/kanban.js company-status/state.js company-agents/updater.js company-agents/team.js; do
   sed 's#from "herdr";#from "./mock.js";#' "$ROOT/mods/$f" > "$T/$(basename "$f")"
 done
 rc=0

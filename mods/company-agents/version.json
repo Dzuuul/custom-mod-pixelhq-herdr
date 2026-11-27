@@ -1,1 +1,1 @@
-{"version":"2.4.0","type":"normal","notes":"Baru: warna per proyek, judul sesi di bawah meja, cari staf lewat nama folder, rapor waktu agent per proyek (klik jam dinding), dan pixel-hq-doctor mengecek jalur WSL. Pengguna WSL: jalankan lagi installer.","base":"pixel-hq 1.8.4"}
+{"version":"2.5.0","type":"normal","notes":"Baru: tombol TIM (lanjutkan sesi atau rekrut ke proyek), intip balasan terakhir, laporan standup, notifikasi sistem, dan meja dikelompokkan per proyek. Pengguna WSL: jalankan lagi installer.","base":"pixel-hq 1.8.4"}

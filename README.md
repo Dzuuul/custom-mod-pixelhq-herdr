@@ -255,6 +255,19 @@ Di bawahnya ada model dan effort (mis. `Sonnet 5.5 · medium`), juga dari status
 - **Rapor harian:** klik jam di dinding buat lihat waktu kerja agent per proyek. Dihitung tiap agent selesai atau
   nunggu jawaban, selama Herdr terbuka, dan mulai lagi dari nol tiap hari (bukan jam kerja kamu).
 
+- **Meja per proyek:** staf dari proyek yang sama duduk berurutan; kalau sebaris, dapat karpet dan papan nama.
+  Meja yang pernah kamu geser tetap di tempatnya (bisa menimpa meja lain; **klik kanan lantai** buat menyusun ulang).
+- **Intip balasan:** arahkan kursor ke meja buat lihat balasan terakhir agent (butuh hook aktivitas, Claude Code).
+- **TIM ▸** (pojok kanan bawah lantai): daftar proyek yang pernah dikerjakan. **LANJUTKAN** membuka tab baru dengan
+  `claude --continue` (sesi terakhir **di folder itu**; dua sesi di satu folder cuma yang terbaru yang kelanjut),
+  **+ BARU** merekrut staf dengan sesi baru. Kalau masih ada staf aktif yang foldernya belum ketahuan, ada
+  peringatan dan tombol LANJUTKAN SEMUA disembunyikan. Daftarnya di `~/.config/herdr-app/pixel-hq-team.json`.
+- **Laporan standup:** di popup jam dinding, **SALIN LAPORAN STANDUP** menyalin waktu agent dan judul sesi per proyek
+  untuk hari kerja sebelumnya dan hari ini (riwayat disimpan 14 hari, mulai dari versi 2.5.0).
+- **Notifikasi sistem:** waktu jendela Herdr gak di depan, staf yang kelar atau nunggu jawaban memunculkan notifikasi
+  Windows (atau `notify-send` di Linux). Isinya cuma nama staf dan proyek. Di Windows muncul atas nama
+  "Windows PowerShell"; matikan di Settings → System → Notifications.
+
 Kalau label kosong, jalankan doctor (`doctor.cmd`, atau `sh doctor.sh`): jalur WSL ikut dicek.
 
 **Claude di WSL di dalam Herdr Windows:** Herdr cuma tahu folder PowerShell yang menjalankan `wsl.exe`,

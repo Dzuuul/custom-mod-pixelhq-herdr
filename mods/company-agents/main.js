@@ -11,6 +11,8 @@ import { Editor } from "./editor.js";
 import { checkPixelHqUpdate, executePixelHqUpdate } from "./updater.js";
 import { assignNames } from "./names.js";
 import { snapshot, clashes, hire, agentTaskArgv } from "./crew.js";
+import { readState } from "./state.js";
+import { teamKey, wslDistro, rememberTeam, openSpec, addTopic, pushHistory, standupText, spent } from "./team.js";
 
 // The figure editor, as a dialog; `space` opens it on that space's pick.
 const openFigures = (space) => openOverlay({ mod: "company-agents", kind: "dialog", frame: "none", width: 860, height: 640, props: { figures: true, ...(space ? { space } : {}) } });
@@ -343,6 +345,14 @@ const agyTranscriptVitals = async (cwd, machine) => {
 
 export default class Agents extends View {
   init(_props, cx) {
+    if (props()?.team) {
+      this.team = [];
+      this.opened = {};
+      const load = (cx) => cx.spawn(async (cx) => { const list = await this.readTeam(); if (JSON.stringify(list) !== JSON.stringify(this.team)) this.team = list; cx.notify(); });
+      load(cx);
+      cx.timer.every(2000, load);
+      return;
+    }
     if (props()?.needsYou || props()?.workload || props()?.today) return;
     if (props()?.sortMenu) return;
     if (props()?.figures) { this.editor = new Editor(cx); return; }
@@ -473,7 +483,12 @@ export default class Agents extends View {
     try { this.events = JSON.parse(localStorage.getItem("events") ?? "[]"); } catch { this.events = []; }
     if (!Array.isArray(this.events)) this.events = [];
     try { this.today = JSON.parse(localStorage.getItem("today") ?? "null"); } catch { this.today = null; }
-    if (!this.today || this.today.day !== dayKey()) this.today = freshDay();
+    try { this.history = JSON.parse(localStorage.getItem("history") ?? "[]"); } catch { this.history = []; }
+    if (!Array.isArray(this.history)) this.history = [];
+    this.rollDay();
+    setShared("pixel-hq.history", this.history);
+    // Daftar tim (proyek yang pernah dikerjakan) buat tombol TIM.
+    if (!checking()) cx.timer.every(10000, (cx) => cx.spawn(async () => { await this.saveTeam().catch(() => {}); }));
     if (JSON.stringify(shared("pixel-hq.today")) !== JSON.stringify(this.today)) setShared("pixel-hq.today", this.today);
     // The clock on the wall and the sky in the windows: one redraw a minute.
     cx.timer.every(60000, (cx) => cx.notify());
@@ -495,7 +510,10 @@ export default class Agents extends View {
       const prev = this.changed[a.address];
       if (prev?.s === s) continue;
       if (prev?.s === "working") this.tally(a, s, prev.at, now);
-      if (prev && (s === "blocked" || (prev.s === "working" && s === "idle"))) this.logEvent(a, s === "blocked" ? "needs" : "shipped", now);
+      if (prev && (s === "blocked" || (prev.s === "working" && s === "idle"))) {
+        this.logEvent(a, s === "blocked" ? "needs" : "shipped", now);
+        if (!window().active) this.desktopNotify(a, s === "blocked");
+      }
       this.changed[a.address] = { s, at: now };
       dirty = true;
     }
@@ -509,6 +527,134 @@ export default class Agents extends View {
     setShared("pixel-hq.changed", this.changed);
   }
 
+  // Hari ganti: simpan hari yang lewat buat laporan standup.
+  rollDay() {
+    if (this.today?.day === dayKey()) return;
+    if (this.today) {
+      this.history = pushHistory(this.history ?? [], this.today);
+      try { localStorage.setItem("history", JSON.stringify(this.history)); } catch { /* storage blocked: kept in memory */ }
+      setShared("pixel-hq.history", this.history);
+    }
+    this.today = freshDay();
+  }
+
+  // Notifikasi sistem, dipanggil waktu jendela Herdr gak di depan (notifikasi bawaan Herdr cuma di dalam aplikasi).
+  // Isinya cuma nama staf dan proyek.
+  desktopNotify(a, needsYou) {
+    if (checking()) return;
+    const who = (shared("pixel-hq.names") ?? {})[a.pane]?.name ?? a.space_name ?? a.program?.name ?? a.address;
+    const folder = foldersOf([a], terminals(), panes()).get(a.address);
+    const title = needsYou ? `${who} nunggu jawaban kamu` : `${who} udah kelar`;
+    const body = folder ? `Proyek ${folder}` : "Pixel HQ";
+    const sent = window().platform === "windows"
+      ? exec("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", `${appHome()}/mods/company-agents/pixel-hq-notify.ps1`, "-Title", title, "-Body", body], { timeout: 15000 })
+      : exec("notify-send", ["--app-name=Pixel HQ", "--", title, body], { timeout: 5000 });
+    sent.catch(() => {}); // tanpa notify-send / notifikasi dimatikan: biarin
+  }
+
+  async readTeam() {
+    const raw = await readTextFile(`${appHome()}/pixel-hq-team.json`).catch(() => null);
+    try { const v = JSON.parse(raw ?? "[]"); return Array.isArray(v) ? v.filter((e) => typeof e?.cwd === "string" && typeof e.folder === "string") : []; } catch { return []; }
+  }
+
+  // Proyek tiap agent Claude yang lagi hidup. `entry` null = foldernya belum diketahui (sesi WSL yang belum melapor).
+  liveTeam() {
+    const terms = new Map(terminals().map((k) => [k.address, k]));
+    const cwdOf = new Map(panes().map((p) => [p.pane, p.cwd]));
+    return agents().filter((a) => /claude/i.test(`${a.app ?? ""} ${a.program?.name ?? ""}`)).map((a) => {
+      const k = terms.get(a.address), distro = wslDistro(k);
+      // di WSL, folder pane cuma folder PowerShell yang menjalankan wsl.exe: cuma label dari statusline yang dipercaya
+      const cwd = k?.labels?.["agent.cwd"] || (distro == null ? cwdOf.get(a.pane) : null);
+      const folder = folderName(cwd);
+      const onWsl = distro ?? (window().platform === "windows" && String(cwd).startsWith("/") ? "" : null);
+      return { a, entry: folder ? { cwd, distro: onWsl, folder, title: sessionTitle(a) } : null, unknown: !cwd };
+    });
+  }
+
+  async saveTeam() {
+    const live = this.liveTeam().flatMap((x) => (x.entry && !x.a.address.includes("/") ? [x.entry] : []));
+    if (!live.length) return;
+    const file = `${appHome()}/pixel-hq-team.json`;
+    const raw = await readTextFile(file).catch(() => null);
+    const next = rememberTeam(await this.readTeam(), live, Date.now());
+    if (next) await writeTextFile(file, JSON.stringify(next, null, 2), raw).catch(() => {}); // keduluan tulisan lain: putaran berikutnya
+  }
+
+  forgetTeam(key, cx) {
+    cx.spawn(async (cx) => {
+      const file = `${appHome()}/pixel-hq-team.json`;
+      const raw = await readTextFile(file).catch(() => null);
+      const next = (await this.readTeam()).filter((e) => teamKey(e) !== key);
+      await writeTextFile(file, JSON.stringify(next, null, 2), raw).catch(() => {});
+      this.team = next;
+      cx.notify();
+    });
+  }
+
+  openProject(entry, resume, cx) {
+    const key = teamKey(entry);
+    if (Date.now() - (this.opened[key] ?? 0) < 60000) return; // dobel klik: jangan buka dua kali
+    this.opened[key] = Date.now();
+    run("tab.new", { name: entry.folder, space: spaces().find((x) => x.active)?.id, ...openSpec(entry, resume, window().platform) });
+    cx.notify();
+  }
+
+  // Popup TIM: lanjutkan sesi terakhir tiap proyek, atau rekrut staf baru ke proyek itu.
+  teamView(t) {
+    const live = this.liveTeam();
+    const activeKeys = new Set(live.flatMap((x) => (x.entry ? [teamKey(x.entry)] : [])));
+    const unknown = live.filter((x) => x.unknown).length;
+    const idle = this.team.filter((e) => !activeKeys.has(teamKey(e)) && Date.now() - (this.opened[teamKey(e)] ?? 0) >= 60000);
+    const mono = "JetBrains Mono";
+    const button = (id, text, color, tip, act) => div().id(id).flex_none().px(7).h(20).flex().items_center().cursor_pointer().border_1().border_color(`${color}88`).bg(`${color}22`)
+      .text_size(10).font_bold().text_color(color).tooltip(tip).on_click(act).child(text);
+    const row = (e, i) => {
+      const key = teamKey(e), isActive = activeKeys.has(key), isOpening = Date.now() - (this.opened[key] ?? 0) < 60000;
+      return h_flex().h(40).flex_none().px(8).gap(6).items_center().border_b(1).border_color("#313244")
+        .child(v_flex().flex_1().min_w(0)
+          .child(div().truncate().text_size(12).font_bold().text_color(projectColor(e.folder)).child(e.folder))
+          .child(div().truncate().text_size(9.5).text_color(t.dim).child(e.title || e.cwd)))
+        .when(isActive || isOpening, (el) => el.child(div().flex_none().text_size(10).text_color(t.dim).child(isActive ? "lagi aktif" : "dibuka…")))
+        .when(!isActive && !isOpening, (el) => el.child(button(`team-resume-${i}`, "LANJUTKAN", "#a6e3a1", `claude --continue di ${e.cwd}: sesi terakhir di folder itu`, (_e, cx) => this.openProject(e, true, cx))))
+        .child(button(`team-new-${i}`, "+ BARU", "#89b4fa", `Rekrut staf baru (sesi baru) di ${e.cwd}`, (_e, cx) => { delete this.opened[key]; this.openProject(e, false, cx); }))
+        .child(button(`team-forget-${i}`, "×", "#a6adc8", "Hapus dari daftar (foldernya gak diapa-apain)", (_e, cx) => this.forgetTeam(key, cx)));
+    };
+    return v_flex().w(420).h(430).p(8).gap(6).bg("#181825").border_1().border_color("#45475a").font_family(mono)
+      .child(h_flex().px(6).justify_between().items_center()
+        .child(div().text_size(11).font_bold().text_color("#f9e2af").child("TIM · PROYEK TERAKHIR"))
+        .child(button("team-close", "ESC", "#a6adc8", "Tutup", () => closeOverlay(props()?.overlay))))
+      .when(unknown > 0, (el) => el.child(div().px(6).text_size(10.5).text_color("#f9b84a")
+        .child(`${unknown} staf aktif belum ketahuan foldernya. Cek dulu sebelum melanjutkan, biar satu sesi gak kebuka dua kali.`)))
+      .child(v_flex().id("team-list").flex_1().min_h(0).overflow_y_scrollbar()
+        .children(this.team.map(row))
+        .when(this.team.length === 0, (el) => el.child(div().p(8).text_size(11.5).text_color(t.muted)
+          .child("Belum ada proyek tercatat. Daftarnya terisi sendiri begitu ada agent Claude yang foldernya ketahuan."))))
+      .when(idle.length > 1 && unknown === 0, (el) => el.child(h_flex().justify_end().px(6)
+        .child(button("team-all", `LANJUTKAN SEMUA (${Math.min(idle.length, 6)})`, "#a6e3a1", "Buka maksimal 6 proyek terbaru yang belum aktif",
+          (_e, cx) => idle.slice(0, 6).forEach((e) => this.openProject(e, true, cx))))));
+  }
+
+  openTeam() {
+    openOverlay({ mod: "company-agents", kind: "popup", frame: "none", width: 420, height: 430, props: { team: true } });
+  }
+
+  // Balasan terakhir agent (ditulis hook Stop Claude Code), dibaca waktu kursor di atas mejanya.
+  peekAt(a, cx) {
+    if (this.peek?.addr === a.address) return;
+    this.peek = { addr: a.address, text: null };
+    cx.notify();
+    if (a.address.includes("/")) return; // mesin lain: filenya gak di sini
+    cx.spawn(async (cx) => {
+      let j = null;
+      try { j = JSON.parse(await readState(`last/${a.address}.json`) ?? "null"); } catch {}
+      const born = terminals().find((k) => k.address === a.address)?.created_ms ?? 0;
+      // nomor terminal bisa dipakai ulang: balasan yang lebih tua dari terminalnya bukan punya staf ini
+      if (this.peek?.addr !== a.address || !j?.text || j.at * 1000 < born) return;
+      this.peek = { addr: a.address, text: String(j.text).trim().slice(0, 420), at: j.at * 1000 };
+      cx.notify();
+    });
+  }
+
   logEvent(a, kind, at) {
     const who = String(a.space_name || a.program?.name || a.address).toUpperCase(), prog = String(a.program?.name || "").toUpperCase();
     this.events = [{ who, prog, kind, at, addr: a.address }, ...this.events].slice(0, 6);
@@ -518,7 +664,7 @@ export default class Agents extends View {
   // An agent stopped working: add its time to today (counted from midnight at most, six hours at most) and, if it finished
   // rather than waiting on you, one task shipped.
   tally(a, s, from, now) {
-    if (!this.today || this.today.day !== dayKey()) this.today = freshDay();
+    this.rollDay();
     const midnight = new Date(); midnight.setHours(0, 0, 0, 0);
     const ms = Math.max(0, Math.min(6 * 3600000, now - Math.max(from, midnight.getTime())));
     this.today.workMs += ms;
@@ -528,6 +674,7 @@ export default class Agents extends View {
     if (folder) {
       this.today.byFolder ??= {};
       this.today.byFolder[folder] = (this.today.byFolder[folder] ?? 0) + ms;
+      addTopic(this.today, folder, sessionTitle(a));
     }
     if (s === "idle") this.today.shipped += 1;
     try { localStorage.setItem("today", JSON.stringify(this.today)); } catch { /* storage blocked: kept in memory */ }
@@ -857,7 +1004,9 @@ export default class Agents extends View {
     try {
       const remote = new Set(spaces().filter((x) => x.machine).map((x) => x.id));
       const paneBy = new Map(panes().map((p) => [p.pane, p]));
-      const ags = agents().filter((a) => !remote.has(a.space));
+      // Terminal WSL dilewati: folder panenya cuma folder PowerShell (sama semua), jadi bakal kebaca "folder sama" padahal bukan.
+      const wsl = new Set(terminals().filter((k) => wslDistro(k) != null).map((k) => k.address));
+      const ags = agents().filter((a) => !remote.has(a.space) && !wsl.has(a.address));
       const snap = await snapshot(exec, ags.map((a) => ({ address: a.address, cwd: paneBy.get(a.pane)?.cwd })).filter((i) => i.cwd));
       const status = new Map(ags.map((a) => [a.address, a.status]));
       const next = clashes(snap, (addr) => status.get(addr) === "working");
@@ -1222,13 +1371,17 @@ export default class Agents extends View {
             .children(shownProjects.map(([name, ms]) => h_flex().justify_between().gap(8).px(10).py(2)
               .child(div().min_w(0).truncate().text_size(11.5).text_color(projectColor(name)).child(name))
               .child(div().flex_none().text_size(12).font_bold().text_color(t.foreground).child(hm(ms)))))))
+          .child(div().id("standup-copy").mx(10).mt(4).h(24).flex().items_center().justify_center().cursor_pointer().border_1().border_color("#89b4fa88").bg("#89b4fa22")
+            .text_size(10.5).font_bold().text_color("#89b4fa").tooltip("Salin ringkasan hari kerja sebelumnya dan hari ini, siap ditempel ke chat tim")
+            .on_click((_e, cx) => { cx.write_to_clipboard(standupText(d, shared("pixel-hq.history") ?? [])); this.copied = true; cx.notify(); })
+            .child(this.copied ? "TERSALIN ✓" : "SALIN LAPORAN STANDUP"))
       );
   }
 
   openToday() {
     const raw = shared("pixel-hq.today");
     const rows = raw?.day === dayKey() ? Math.min(TODAY_ROWS, Object.keys(raw.byFolder ?? {}).length) : 0;
-    openOverlay({ mod: "company-agents", kind: "popup", frame: "none", width: 300, height: 214 + (rows ? 28 + rows * 22 : 0), props: { today: true } });
+    openOverlay({ mod: "company-agents", kind: "popup", frame: "none", width: 300, height: 248 + (rows ? 28 + rows * 22 : 0), props: { today: true } });
   }
 
   openNeedsYou() {
@@ -1572,6 +1725,7 @@ export default class Agents extends View {
     if (props()?.needsYou) return this.needsYou(t);
     if (props()?.workload) return this.workloadView(t);
     if (props()?.today) return this.todayView(t);
+    if (props()?.team) return this.teamView(t);
     if (this.editor) return this.editor.render(cx);
     const dismissed = shared("pixel-hq.dismissed-version") || localStorage.getItem("upd-dismissed");
     if (this.update && dismissed === String(this.update.version)) {
@@ -1875,17 +2029,21 @@ export default class Agents extends View {
     const stable = list.map((x) => x.address).sort((x, y) => x.localeCompare(y, undefined, { numeric: true }));
     const seated = list.slice(0, pick.cols * pick.rows);
     const shownSet = new Set(seated.map((x) => x.address));
-    const order = stable.filter((x) => shownSet.has(x));
+    // Staf yang proyeknya sama duduk berdekatan; yang belum ketahuan proyeknya di belakang.
+    const projectOf = (addr) => folderOf.get(addr) ?? "\uffff";
+    const order = stable.filter((x) => shownSet.has(x)).sort((x, y) => projectOf(x).localeCompare(projectOf(y)));
     const colsUsed = Math.min(pick.cols, Math.max(2, Math.ceil(seated.length / pick.rows)));
     const rowsUsed = Math.ceil(seated.length / colsUsed);
     const hidden = list.length - seated.length;
     const posOf = new Map();
+    // Kolom ganjil diturunkan sedikit, tapi cuma kalau jarak antar baris masih setinggi meja (kalau gak, mejanya bertumpuk).
+    const stagger = rowsUsed < 3 && fieldH / (rowsUsed - 1 + 0.12) >= cellH ? 0.12 : 0;
     const monoF = "JetBrains Mono";
     const pets = seated.map((a, i) => {
       // A pet keeps its desk: slots follow a stable order, not the status sort.
       const slot = order.indexOf(a.address);
       const sx = ((slot % colsUsed) + 0.5) / colsUsed;
-      const sy = rowsUsed > 1 ? (Math.floor(slot / colsUsed) + ((slot % colsUsed) % 2) * (rowsUsed < 3 ? 0.12 : 0)) / (rowsUsed - 1 + (rowsUsed < 3 ? 0.12 : 0)) : 0;
+      const sy = rowsUsed > 1 ? (Math.floor(slot / colsUsed) + ((slot % colsUsed) % 2) * stagger) / (rowsUsed - 1 + stagger) : 0;
       const lap = 0;
       const own = this.petpos[a.address];
       // Room for the cubicle panels (9 units each side) and the server rack (11 units right), so an edge desk shows them.
@@ -2050,6 +2208,10 @@ export default class Agents extends View {
         })
         .on_mouse_up("left", (_e, cx) => endDrag(cx))
         .on_mouse_down("right", (_e, cx) => { cx.stop_propagation(); openFigures(a.space_name); })
+        .on_hover((on, cx) => {
+          if (on) this.peekAt(a, cx);
+          else if (this.peek?.addr === a.address) { this.peek = null; cx.notify(); }
+        })
         .tooltip(`${a.program?.name ?? ""} · ${isUrge ? `idle for ${duration(waited)} · click to focus` : isSnooze ? `snoozing (${duration(waited)}) · click to focus` : a.status} · ${text}${job ? ` · ${job}` : ""}${topic ? ` · ${topic}` : ""}${branch ? ` · ${branch}` : ""}${clTip ? ` · ${clTip}` : ""}${ctx ? ` · ${vitalsTip(ctx)}` : ""}${act.interns.length ? ` · ${act.interns.length} sub-agent${act.interns.length > 1 ? "s" : ""}` : ""}${act.jobs ? ` · ${act.jobs} shell job${act.jobs > 1 ? "s" : ""}${act.long ? ` (${act.long} over a minute)` : ""}` : ""} · drag to move`)
         .child(seat)
         .child(div().mt(6).max_w(Math.max(petW + 22, cellW - 4)).px(5).h(15).flex().items_center()
@@ -2067,6 +2229,22 @@ export default class Agents extends View {
           .when(Boolean(modelTxt), (el) => el.child(div().min_w(0).truncate().text_color(t.dim).child(branch ? `· ${modelTxt}` : modelTxt)))))
         .when(ctx != null && cellW >= 90, (el) => el.child(div().mt(2).max_w(Math.max(petW + 22, cellW - 4)).child(vitalsBars(t, ctx, `farm-vitals-${a.address}`, Math.max(petW + 22, cellW - 4)))));
     });
+    // Karpet dan papan nama buat dua meja atau lebih yang sebaris dan satu proyek.
+    const rugs = [];
+    for (let i = 0; i < order.length;) {
+      const folder = folderOf.get(order[i]), row = Math.floor(i / colsUsed);
+      let j = i + 1;
+      while (folder && j < order.length && Math.floor(j / colsUsed) === row && folderOf.get(order[j]) === folder) j++;
+      const group = order.slice(i, j);
+      i = j;
+      if (group.length < 2 || group.some((addr) => this.petpos[addr] || !posOf.has(addr))) continue; // meja yang digeser sendiri: tanpa karpet
+      const xs = group.map((addr) => posOf.get(addr).x), ys = group.map((addr) => posOf.get(addr).y - PET * 0.5);
+      const slotW = sz.width / colsUsed;
+      const x0 = Math.max(2, Math.min(...xs) - slotW / 2 + 2), x1 = Math.min(sz.width - 2, Math.max(...xs) + slotW / 2 - 2);
+      const y0 = Math.min(...ys) - kk(30), color = projectColor(folder);
+      rugs.push(div().absolute().left(x0).top(y0).w(x1 - x0).h(Math.max(...ys) - y0 + cellH - kk(14)).rounded(6).bg(`${color}14`).border_1().border_color(`${color}55`)
+        .child(div().absolute().left(6).top(1).text_size(9).font_bold().text_color(color).child(folder.toUpperCase())));
+    }
     // A dotted line of sparks between two desks that are about to clash.
     const links = [];
     for (const [addr, c] of this.clash) {
@@ -2128,6 +2306,7 @@ export default class Agents extends View {
       .when(list.length === 0 && settledFloor === 0, (el) => el.child(div().absolute().left(12).top(sz.height * 0.5).w(sz.width - 24).px(8).py(6).bg("#0f111acc").border_1().border_color("#313244").text_size(12).text_color("#ffffff").child("Belum ada staf di lantai ini. Rekrut pakai tombol + di atas, atau jalanin agent di space ini.")))
       .when(list.length === 0 && settledFloor > 0, (el) => el.child(div().absolute().left(12).top(sz.height * 0.5).w(sz.width - 24).px(8).py(6).bg("#0f111acc").border_1().border_color("#313244").text_size(12).text_color("#a6e3a1").child("Semua yang kelar udah pulang. Klik chip ✓ di pojok buat manggil balik.")))
       .when(hidden > 0, (el) => el.child(div().absolute().right(8).top(horizon + 6).px(8).py(3).bg("#11111bdd").border_1().border_color("#45475a").text_size(11).text_color("#cdd6f4").child(`+${hidden} lagi · sempitkan panel buat lihat semua`)))
+      .children(rugs)
       .children(links)
       .children(this.drag?.moved ? [...pets.filter((_, i) => seated[i].address !== this.drag.addr), ...pets.filter((_, i) => seated[i].address === this.drag.addr)] : pets)
       .when(Boolean(this.notice), (el) => {
@@ -2138,7 +2317,21 @@ export default class Agents extends View {
       .when(settledCount > 0, (el) => el.child(div().id("settled-undo").absolute().right(8).top(this.notice ? horizon + 84 : horizon + 6).px(8).py(3).bg("#11111bdd").border_1().border_color("#45475a").text_size(11).text_color("#a6e3a1").cursor_pointer()
         .tooltip("Panggil balik semua staf yang udah pulang")
         .on_click((_e, cx) => { this.settled.clear(); try { localStorage.removeItem("settled"); } catch { /* storage disabled: next render retries */ } cx.notify(); })
-        .child(`✓ ${settledCount} pulang`)));
+        .child(`✓ ${settledCount} pulang`)))
+      .child(div().id("team-open").absolute().right(8).bottom(8).px(8).py(3).bg("#11111bdd").border_1().border_color("#89b4fa88").text_size(11).text_color("#89b4fa").cursor_pointer()
+        .tooltip("Tim: lanjutkan sesi terakhir tiap proyek, atau rekrut staf baru ke proyek")
+        .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+        .on_click((_e, cx) => { cx.stop_propagation(); this.openTeam(); })
+        .child("TIM ▸"))
+      .when(Boolean(this.peek?.text) && !this.drag, (el) => {
+        const a = list.find((x) => x.address === this.peek.addr);
+        if (!a) return el;
+        const who = (shared("pixel-hq.names") ?? {})[a.pane]?.name ?? a.space_name ?? label(a);
+        // di atas (area dinding), biar gak menutupi meja yang lagi ditunjuk
+        return el.child(v_flex().absolute().left(8).right(8).top(8).max_h(Math.max(80, fieldTop - 12)).overflow_hidden().px(8).py(6).gap(3).bg("#11111bf2").border_1().border_color("#89b4fa")
+          .child(div().truncate().text_size(10).font_bold().text_color("#89b4fa").child(`${who} · balasan terakhir ${duration(now - this.peek.at)} lalu`))
+          .child(div().text_size(10.5).text_color("#cdd6f4").child(this.peek.text)));
+      });
 
     // Pixel UI: notched 2px frames, a hard bottom shadow, a mono caps title and a hand-drawn magnifier.
     const frame = (bc, bg) => [
